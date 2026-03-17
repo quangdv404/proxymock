@@ -43,3 +43,14 @@ struct NetworkLog: Identifiable, Sendable {
         self.isHTTPS = isHTTPS
     }
 }
+
+extension Data {
+    /// Safely converts Data to String for logging. Truncated if over 1 MB to prevent RAM exhaustion.
+    var loggableString: String {
+        let maxBytes = 1_048_576 // 1 MB
+        if self.count > maxBytes {
+            return "<huge payload truncated: \(self.count) bytes>"
+        }
+        return String(data: self, encoding: .utf8) ?? "<binary \(self.count) bytes>"
+    }
+}

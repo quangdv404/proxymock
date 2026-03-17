@@ -155,9 +155,7 @@ struct MockRuleEditorView: View {
                             .buttonStyle(.bordered)
                     }
 
-                    TextEditor(text: $rule.responseBody)
-                        .font(.system(.body, design: .monospaced))
-                        .disableAutocorrection(true)
+                    JSONEditorView(text: $rule.responseBody)
                         .frame(minHeight: 180)
                         .padding(4)
                         .background(Color(nsColor: .textBackgroundColor))

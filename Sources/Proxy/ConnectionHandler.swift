@@ -146,6 +146,7 @@ final class ConnectionHandler: @unchecked Sendable {
         // Perform TLS handshake with the client
         var handshakeStatus = SSLHandshake(sslContext)
         while handshakeStatus == errSSLWouldBlock {
+            Thread.sleep(forTimeInterval: 0.01)
             handshakeStatus = SSLHandshake(sslContext)
         }
 
@@ -166,15 +167,18 @@ final class ConnectionHandler: @unchecked Sendable {
         let fullURL = "https://\(host)\(port != 443 ? ":\(port)" : "")\(path)"
 
         // 6. Check Map Local rules
-        if let mapLocal = matchMapLocal(method: httpRequest.method, url: fullURL, requestBody: String(data: httpRequest.body, encoding: .utf8) ?? "") {
+        if let mapLocal = matchMapLocal(method: httpRequest.method, url: fullURL, requestBody: httpRequest.body.loggableString) {
+            if mapLocal.delaySeconds > 0 {
+                Thread.sleep(forTimeInterval: mapLocal.delaySeconds)
+            }
             let responseBody = loadLocalResponse(rule: mapLocal)
             let headers = ["Content-Type": mapLocal.contentType, "X-ProxyMock-MapLocal": "true"]
             let log = NetworkLog(
                 method: httpRequest.method, url: fullURL,
                 requestHeaders: httpRequest.headersDict,
-                requestBody: String(data: httpRequest.body, encoding: .utf8) ?? "",
+                requestBody: httpRequest.body.loggableString,
                 responseStatusCode: mapLocal.statusCode,
-                responseHeaders: headers, responseBody: String(data: responseBody, encoding: .utf8) ?? "<binary \(responseBody.count) bytes>",
+                responseHeaders: headers, responseBody: responseBody.loggableString,
                 duration: Date().timeIntervalSince(startTime), isMocked: true, isHTTPS: true
             )
             onLog(log)
@@ -188,7 +192,7 @@ final class ConnectionHandler: @unchecked Sendable {
             let log = NetworkLog(
                 method: httpRequest.method, url: fullURL,
                 requestHeaders: httpRequest.headersDict,
-                requestBody: String(data: httpRequest.body, encoding: .utf8) ?? "",
+                requestBody: httpRequest.body.loggableString,
                 responseStatusCode: mockRule.responseStatusCode,
                 responseHeaders: mockRule.responseHeaders, responseBody: mockRule.responseBody,
                 duration: Date().timeIntervalSince(startTime), isMocked: true, isHTTPS: true
@@ -230,14 +234,24 @@ final class ConnectionHandler: @unchecked Sendable {
             let httpResponse = response as? HTTPURLResponse
             let statusCode = httpResponse?.statusCode ?? (error != nil ? 502 : 200)
             var respHeaders: [String: String] = [:]
-            httpResponse?.allHeaderFields.forEach { respHeaders["\($0)"] = "\($1)" }
+            if let headersDict = httpResponse?.allHeaderFields as? [String: String] {
+                respHeaders = headersDict
+            } else if let headersDict = httpResponse?.allHeaderFields {
+                for (k, v) in headersDict {
+                    if let kStr = k as? String, let vStr = v as? String {
+                        respHeaders[kStr] = vStr
+                    } else {
+                        respHeaders[String(describing: k)] = String(describing: v)
+                    }
+                }
+            }
             let bodyData = data ?? Data()
-            let bodyString = String(data: bodyData, encoding: .utf8) ?? "<binary \(bodyData.count) bytes>"
+            let bodyString = bodyData.loggableString
 
             let log = NetworkLog(
                 method: httpRequest.method, url: fullURL,
                 requestHeaders: httpRequest.headersDict,
-                requestBody: String(data: httpRequest.body, encoding: .utf8) ?? "",
+                requestBody: httpRequest.body.loggableString,
                 responseStatusCode: statusCode, responseHeaders: respHeaders,
                 responseBody: error != nil ? "Error: \(error!.localizedDescription)" : bodyString,
                 duration: Date().timeIntervalSince(startTime), isHTTPS: true
@@ -306,14 +320,17 @@ final class ConnectionHandler: @unchecked Sendable {
     private func handleHTTPRequest(request: ParsedHTTPRequest, startTime: Date) {
         
         // Check Map Local
-        if let mapLocal = matchMapLocal(method: request.method, url: request.fullURL, requestBody: String(data: request.body, encoding: .utf8) ?? "") {
+        if let mapLocal = matchMapLocal(method: request.method, url: request.fullURL, requestBody: request.body.loggableString) {
+            if mapLocal.delaySeconds > 0 {
+                Thread.sleep(forTimeInterval: mapLocal.delaySeconds)
+            }
             let body = loadLocalResponse(rule: mapLocal)
             let headers = ["Content-Type": mapLocal.contentType]
             let log = NetworkLog(method: request.method, url: request.fullURL,
                                  requestHeaders: request.headersDict,
-                                 requestBody: String(data: request.body, encoding: .utf8) ?? "",
+                                 requestBody: request.body.loggableString,
                                  responseStatusCode: mapLocal.statusCode, responseHeaders: headers,
-                                 responseBody: String(data: body, encoding: .utf8) ?? "<binary \(body.count) bytes>", duration: Date().timeIntervalSince(startTime), isMocked: true)
+                                 responseBody: body.loggableString, duration: Date().timeIntervalSince(startTime), isMocked: true)
             onLog(log)
             let resp = HTTPParser.buildResponse(statusCode: mapLocal.statusCode, headers: headers, body: body)
             _ = writeToSocket(clientFd, data: resp)
@@ -346,7 +363,7 @@ final class ConnectionHandler: @unchecked Sendable {
         let log = NetworkLog(
             method: request.method, url: request.fullURL,
             requestHeaders: request.headersDict,
-            requestBody: String(data: request.body, encoding: .utf8) ?? "",
+            requestBody: request.body.loggableString,
             responseStatusCode: rule.responseStatusCode,
             responseHeaders: rule.responseHeaders, responseBody: rule.responseBody,
             duration: Date().timeIntervalSince(startTime), isMocked: true
@@ -384,14 +401,24 @@ final class ConnectionHandler: @unchecked Sendable {
             let httpResponse = response as? HTTPURLResponse
             let statusCode = httpResponse?.statusCode ?? (error != nil ? 502 : 200)
             var headers: [String: String] = [:]
-            httpResponse?.allHeaderFields.forEach { headers["\($0)"] = "\($1)" }
+            if let headersDict = httpResponse?.allHeaderFields as? [String: String] {
+                headers = headersDict
+            } else if let headersDict = httpResponse?.allHeaderFields {
+                for (k, v) in headersDict {
+                    if let kStr = k as? String, let vStr = v as? String {
+                        headers[kStr] = vStr
+                    } else {
+                        headers[String(describing: k)] = String(describing: v)
+                    }
+                }
+            }
             let bodyData = data ?? Data()
-            let bodyString = String(data: bodyData, encoding: .utf8) ?? "<binary \(bodyData.count) bytes>"
+            let bodyString = bodyData.loggableString
 
             let log = NetworkLog(
                 method: request.method, url: request.fullURL,
                 requestHeaders: request.headersDict,
-                requestBody: String(data: request.body, encoding: .utf8) ?? "",
+                requestBody: request.body.loggableString,
                 responseStatusCode: statusCode, responseHeaders: headers,
                 responseBody: error != nil ? "Error: \(error!.localizedDescription)" : bodyString,
                 duration: Date().timeIntervalSince(startTime)
@@ -452,9 +479,7 @@ final class ConnectionHandler: @unchecked Sendable {
     }
 
     private func matchesWildcard(url: String, pattern: String) -> Bool {
-        let escaped = NSRegularExpression.escapedPattern(for: pattern)
-        let p = "^" + escaped.replacingOccurrences(of: "\\*", with: ".*") + "$"
-        return (try? Regex(p).firstMatch(in: url)) != nil
+        return RegexCache.shared.matchesPattern(url: url, pattern: pattern)
     }
 
     private func buildHTTPResponse(statusCode: Int, headers: [String: String], body: Data) -> Data {
@@ -477,6 +502,9 @@ final class ConnectionHandler: @unchecked Sendable {
             var bytesRead = 0
             if let ctx = sslContext {
                 let status = SSLRead(ctx, &buffer, buffer.count, &bytesRead)
+                if status == errSSLClosedGraceful && bytesRead == 0 {
+                    break // Client gracefully closed the TLS session (EOF)
+                }
                 if status != noErr && status != errSSLClosedGraceful {
                     if bytesRead == 0 {
                         if status == errSSLWouldBlock {
@@ -629,15 +657,16 @@ final class ConnectionHandler: @unchecked Sendable {
     }
 
     private func relayOneWay(from src: Int32, to dst: Int32) {
-        var buffer = [UInt8](repeating: 0, count: 32768)
+        let bufferSize = 32768
+        let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: bufferSize, alignment: 8)
+        defer { buffer.deallocate() }
+
         while true {
-            let n = Darwin.read(src, &buffer, buffer.count)
+            let n = Darwin.read(src, buffer.baseAddress, bufferSize)
             if n <= 0 { break }
             var written = 0
             while written < n {
-                let w = buffer.withUnsafeBytes { rawBuf in
-                    Darwin.write(dst, rawBuf.baseAddress!.advanced(by: written), n - written)
-                }
+                let w = Darwin.write(dst, buffer.baseAddress!.advanced(by: written), n - written)
                 if w <= 0 { return }
                 written += w
             }

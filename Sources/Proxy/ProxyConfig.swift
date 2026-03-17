@@ -21,26 +21,19 @@ struct ProxyConfig: Sendable {
         let host = extractHost(from: url)
         let blockRules = domainFilterRules.filter { $0.isEnabled && $0.listType == .block }
         let allowRules = domainFilterRules.filter { $0.isEnabled && $0.listType == .allow }
-        let bypassRules = domainFilterRules.filter { $0.isEnabled && $0.listType == .bypass }
-        
-        // 0. Bypass List wins - if host matches a bypass rule, immediately passthrough without MITM
-        if !bypassRules.isEmpty && matchesDomain(host: host, rules: bypassRules) {
-            return .passthrough
-        }
-
-        // 1. Block list always wins over allow — if host matches a block rule, drop it
+        // 0. Block list always wins over allow — if host matches a block rule, drop it
         if !blockRules.isEmpty && matchesDomain(host: host, rules: blockRules) {
             return .block
         }
 
-        // 2. If allow list has entries, only allow-listed hosts get full processing
-        //    Non-matching hosts passthrough silently (forwarded, not logged)
+        // 1. If allow list has entries, only allow-listed hosts get full processing
+        //    Non-matching hosts passthrough silently
         if !allowRules.isEmpty {
             return matchesDomain(host: host, rules: allowRules) ? .process : .passthrough
         }
 
-        // 3. No allow list entries — process everything (that isn't blocked or bypassed)
-        return .process
+        // 2. Default architecture: bypass everything (passthrough)
+        return .passthrough
     }
 
     private func matchesDomain(host: String, rules: [DomainFilterRule]) -> Bool {

@@ -72,7 +72,7 @@ final class ProxyServer {
         }
     }
 
-    private func acceptLoop(serverFd: Int32) {
+    private nonisolated func acceptLoop(serverFd: Int32) {
         while true {
             let clientFd = Darwin.accept(serverFd, nil, nil)
             if clientFd < 0 {

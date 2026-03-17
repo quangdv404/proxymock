@@ -20,6 +20,7 @@ struct MapLocalRule: Identifiable, Codable, Hashable, Sendable {
     
     var contentType: String
     var statusCode: Int
+    var delaySeconds: Double
 
     init(
         id: UUID = UUID(),
@@ -33,7 +34,8 @@ struct MapLocalRule: Identifiable, Codable, Hashable, Sendable {
         inlineBody: String = "{\n  \"message\": \"success\"\n}",
         inlineRequestMatch: String = "",
         contentType: String = "application/json",
-        statusCode: Int = 200
+        statusCode: Int = 200,
+        delaySeconds: Double = 0.0
     ) {
         self.id = id
         self.name = name
@@ -47,6 +49,7 @@ struct MapLocalRule: Identifiable, Codable, Hashable, Sendable {
         self.inlineRequestMatch = inlineRequestMatch
         self.contentType = contentType
         self.statusCode = statusCode
+        self.delaySeconds = delaySeconds
     }
 }
 

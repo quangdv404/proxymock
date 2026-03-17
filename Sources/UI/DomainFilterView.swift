@@ -4,7 +4,6 @@ struct DomainFilterView: View {
     @Environment(AppState.self) private var appState
     @State private var newBlockDomain = ""
     @State private var newAllowDomain = ""
-    @State private var newBypassDomain = ""
 
     private let commonBlockDomains: [(category: String, domains: [String])] = [
         ("Analytics", ["*.google-analytics.com", "*.crashlytics.com", "*.mixpanel.com", "*.amplitude.com", "*.segment.com"]),
@@ -17,9 +16,6 @@ struct DomainFilterView: View {
     }
     var allowRules: [DomainFilterRule] {
         appState.domainFilterRules.filter { $0.listType == .allow }
-    }
-    var bypassRules: [DomainFilterRule] {
-        appState.domainFilterRules.filter { $0.listType == .bypass }
     }
 
     var body: some View {
@@ -37,10 +33,6 @@ struct DomainFilterView: View {
                         Label("\(allowRules.filter(\.isEnabled).count) allowed", systemImage: "checkmark.shield")
                             .font(.caption).foregroundStyle(.green)
                     }
-                    if !bypassRules.isEmpty {
-                        Label("\(bypassRules.filter(\.isEnabled).count) bypassed", systemImage: "arrow.uturn.forward.circle")
-                            .font(.caption).foregroundStyle(.orange)
-                    }
                 }
             }
             .padding(12).background(.bar)
@@ -54,11 +46,9 @@ struct DomainFilterView: View {
                             Text("How filtering works:").font(.callout.bold())
                             Label("**Block List** — matching domains are dropped entirely", systemImage: "xmark.circle")
                                 .font(.caption).foregroundStyle(.red)
-                            Label("**Bypass List** — matching domains immediately passthrough without MITM", systemImage: "arrow.uturn.forward.circle")
-                                .font(.caption).foregroundStyle(.orange)
-                            Label("**Allow List** — only matching domains are captured & logged, others passthrough", systemImage: "checkmark.circle")
+                            Label("**Allow List** — only matching domains are captured & logged, everything else bypasses MITM", systemImage: "checkmark.circle")
                                 .font(.caption).foregroundStyle(.green)
-                            Text("Block rules take priority over allow rules. Both lists work simultaneously.")
+                            Text("By default, all proxy traffic is passed-through silently. You MUST add domains to the Allow List to mock, map, or inspect them.")
                                 .font(.caption).foregroundStyle(.secondary).padding(.top, 2)
                         }.padding(4)
                     }
@@ -90,32 +80,6 @@ struct DomainFilterView: View {
                         }.padding(4)
                     }
 
-                    // ═══════ BYPASS LIST ═══════
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Label("Bypass List", systemImage: "arrow.uturn.forward.circle.fill")
-                                .font(.headline).foregroundStyle(.orange)
-                            Text("These domains will bypass MITM perfectly. Essential for apps with Certificate Pinning (like Microsoft Teams, Banking Apps).")
-                                .font(.caption).foregroundStyle(.secondary)
-
-                            HStack {
-                                TextField("e.g. *.microsoft.com", text: $newBypassDomain)
-                                    .textFieldStyle(.roundedBorder).font(.body.monospaced())
-                                    .onSubmit { addDomain(newBypassDomain, type: .bypass); newBypassDomain = "" }
-                                Button("Add") { addDomain(newBypassDomain, type: .bypass); newBypassDomain = "" }
-                                    .buttonStyle(.borderedProminent).tint(.orange)
-                                    .disabled(newBypassDomain.isEmpty)
-                            }
-
-                            if bypassRules.isEmpty {
-                                Text("No bypass rules")
-                                    .font(.caption).foregroundStyle(.secondary).italic()
-                                    .frame(maxWidth: .infinity).padding(.vertical, 8)
-                            } else {
-                                DomainRulesList(rules: bypassRules, appState: appState, tint: .orange)
-                            }
-                        }.padding(4)
-                    }
 
                     // ═══════ BLOCK LIST ═══════
                     GroupBox {

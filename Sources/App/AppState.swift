@@ -200,9 +200,7 @@ final class AppState {
     }
 
     private func matchWildcard(input: String, pattern: String) -> Bool {
-        let escaped = NSRegularExpression.escapedPattern(for: pattern)
-        let regex = "^" + escaped.replacingOccurrences(of: "\\*", with: ".*") + "$"
-        return (try? Regex(regex).firstMatch(in: input)) != nil
+        return RegexCache.shared.matchesPattern(url: input, pattern: pattern)
     }
 
     // MARK: - Compose Request
@@ -225,9 +223,19 @@ final class AppState {
             let httpResponse = response as? HTTPURLResponse
             let statusCode = httpResponse?.statusCode ?? (error != nil ? 0 : 200)
             var responseHeaders: [String: String] = [:]
-            httpResponse?.allHeaderFields.forEach { responseHeaders["\($0)"] = "\($1)" }
+            if let headersDict = httpResponse?.allHeaderFields as? [String: String] {
+                responseHeaders = headersDict
+            } else if let headersDict = httpResponse?.allHeaderFields {
+                for (k, v) in headersDict {
+                    if let kStr = k as? String, let vStr = v as? String {
+                        responseHeaders[kStr] = vStr
+                    } else {
+                        responseHeaders[String(describing: k)] = String(describing: v)
+                    }
+                }
+            }
             let bodyData = data ?? Data()
-            let bodyString = String(data: bodyData, encoding: .utf8) ?? "<binary \(bodyData.count) bytes>"
+            let bodyString = bodyData.loggableString
 
             let log = NetworkLog(
                 method: method,

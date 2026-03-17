@@ -50,13 +50,6 @@ final class MockEngine {
 
     /// Simple wildcard and regex pattern matching
     nonisolated func matchesPattern(url: String, pattern: String) -> Bool {
-        if pattern.hasPrefix("regex:") {
-            let regexPattern = String(pattern.dropFirst(6))
-            return (try? Regex(regexPattern).firstMatch(in: url)) != nil
-        }
-
-        let escaped = NSRegularExpression.escapedPattern(for: pattern)
-        let wildcardPattern = "^" + escaped.replacingOccurrences(of: "\\*", with: ".*") + "$"
-        return (try? Regex(wildcardPattern).firstMatch(in: url)) != nil
+        return RegexCache.shared.matchesPattern(url: url, pattern: pattern)
     }
 }

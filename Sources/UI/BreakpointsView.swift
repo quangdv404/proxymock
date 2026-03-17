@@ -193,8 +193,7 @@ struct BreakpointEditorView: View {
 
                     Divider()
                     SectionHeader(title: "Body", icon: "doc.text")
-                    TextEditor(text: $edit.body)
-                        .font(.system(.body, design: .monospaced))
+                    JSONEditorView(text: $edit.body)
                         .frame(minHeight: 200)
                         .padding(4)
                         .background(Color(nsColor: .textBackgroundColor))

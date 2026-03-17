@@ -227,15 +227,9 @@ struct MapLocalEditor: View {
                         }
                     } else {
                         LabeledField(label: "Response Body") {
-                            TextEditor(text: $rule.inlineBody)
-                                .font(.system(.body, design: .monospaced))
-                                .disableAutocorrection(true)
+                            JSONEditorView(text: $rule.inlineBody)
                                 .frame(height: 200)
                                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
-                                .onChange(of: rule.inlineBody) { newValue in
-                                    let fixed = newValue.replacingOccurrences(of: "“", with: "\"").replacingOccurrences(of: "”", with: "\"")
-                                    if fixed != newValue { rule.inlineBody = fixed }
-                                }
                         }
                     }
                     
@@ -243,15 +237,9 @@ struct MapLocalEditor: View {
                     
                     LabeledField(label: "Request Body Match") {
                         VStack(alignment: .leading, spacing: 4) {
-                            TextEditor(text: $rule.inlineRequestMatch)
-                                .font(.system(.body, design: .monospaced))
-                                .disableAutocorrection(true)
+                            JSONEditorView(text: $rule.inlineRequestMatch)
                                 .frame(height: 100)
                                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
-                                .onChange(of: rule.inlineRequestMatch) { newValue in
-                                    let fixed = newValue.replacingOccurrences(of: "“", with: "\"").replacingOccurrences(of: "”", with: "\"")
-                                    if fixed != newValue { rule.inlineRequestMatch = fixed }
-                                }
                             Text("If provided, this rule will ONLY trigger if the incoming HTTP request body contains this exact text string.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -267,6 +255,12 @@ struct MapLocalEditor: View {
                     }
                     LabeledField(label: "Status Code") {
                         TextField("200", value: $rule.statusCode, format: .number).textFieldStyle(.roundedBorder).frame(width: 100)
+                    }
+                    LabeledField(label: "Delay") {
+                        HStack {
+                            Slider(value: $rule.delaySeconds, in: 0...10, step: 0.5)
+                            Text("\(rule.delaySeconds, specifier: "%.1f")s").font(.caption.monospaced())
+                        }.frame(width: 250)
                     }
                 }.padding(20)
             }
