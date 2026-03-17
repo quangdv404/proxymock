@@ -1,0 +1,286 @@
+import SwiftUI
+
+struct MapLocalView: View {
+    @Environment(AppState.self) private var appState
+    @State private var editingRule: MapLocalRule?
+    @State private var expandedGroups: Set<String> = []
+
+    private var groupedRules: [(String, [MapLocalRule])] {
+        let grouped = Dictionary(grouping: appState.mapLocalRules, by: { $0.group.trimmingCharacters(in: .whitespaces) })
+        return grouped.map { ($0.key, $0.value) }.sorted {
+            if $0.0 == "" && $1.0 != "" { return false }
+            if $0.0 != "" && $1.0 == "" { return true }
+            return $0.0.localizedCaseInsensitiveCompare($1.0) == .orderedAscending
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Text("Map Local").font(.headline)
+                Spacer()
+                
+                Button { importYaml() } label: { Label("Import YAML", systemImage: "square.and.arrow.down") }
+                    .buttonStyle(.bordered)
+                
+                Button { editingRule = MapLocalRule() } label: { Label("Add Rule", systemImage: "plus") }
+                    .buttonStyle(.borderedProminent)
+                    
+                Text("\(appState.mapLocalRules.count) rules").font(.caption.monospaced()).foregroundStyle(.secondary)
+            }
+            .padding(12).background(.bar)
+            Divider()
+
+            if appState.mapLocalRules.isEmpty {
+                EmptyFeatureView(icon: "doc.on.doc", title: "No Map Local Rules",
+                    subtitle: "Map URL patterns to local files on disk. Great for offline dev or testing custom responses.") {
+                    editingRule = MapLocalRule()
+                }
+            } else {
+                List {
+                    ForEach(groupedRules, id: \.0) { groupName, rules in
+                        DisclosureGroup(
+                            isExpanded: Binding(
+                                get: { !expandedGroups.contains(groupName) },
+                                set: { isExpanded in
+                                    if isExpanded {
+                                        expandedGroups.remove(groupName)
+                                    } else {
+                                        expandedGroups.insert(groupName)
+                                    }
+                                }
+                            ),
+                            content: {
+                                ForEach(rules) { rule in
+                                    HStack(spacing: 12) {
+                                        Toggle("", isOn: Binding(
+                                            get: { rule.isEnabled },
+                                            set: { val in var r = rule; r.isEnabled = val; appState.updateMapLocalRule(r) }
+                                        )).labelsHidden()
+
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(rule.name).font(.headline)
+                                            HStack(spacing: 6) {
+                                                Text(rule.httpMethod).font(.caption.monospaced().bold())
+                                                    .foregroundStyle(.white).padding(.horizontal, 4).padding(.vertical, 1)
+                                                    .background(.blue).clipShape(RoundedRectangle(cornerRadius: 3))
+                                                Text(rule.urlPattern).font(.caption.monospaced()).foregroundStyle(.secondary)
+                                            }
+                                            if rule.source == .file {
+                                                Text("→ File: \(rule.localFilePath.isEmpty ? "None" : (rule.localFilePath as NSString).lastPathComponent)")
+                                                    .font(.caption.monospaced()).foregroundStyle(.green).lineLimit(1)
+                                            } else {
+                                                Text("→ Inline Text")
+                                                    .font(.caption.monospaced()).foregroundStyle(.blue).lineLimit(1)
+                                            }
+                                        }
+                                        Spacer()
+                                        Text("\(rule.statusCode)").font(.caption.monospaced().bold()).foregroundStyle(.green)
+                                        Button { editingRule = rule } label: { Image(systemName: "pencil") }.buttonStyle(.plain)
+                                        Button { appState.deleteMapLocalRule(id: rule.id) } label: { Image(systemName: "trash").foregroundStyle(.red) }.buttonStyle(.plain)
+                                    }
+                                    .padding(.horizontal, 24).opacity(rule.isEnabled ? 1 : 0.5)
+                                }
+                            },
+                            label: {
+                                MapLocalGroupHeader(groupName: groupName, rules: rules)
+                            }
+                        )
+                    }
+                }.listStyle(.sidebar)
+            }
+        }
+        .sheet(item: $editingRule) { rule in
+            MapLocalEditor(rule: rule, isNew: !appState.mapLocalRules.contains { $0.id == rule.id }) { saved in
+                if appState.mapLocalRules.contains(where: { $0.id == saved.id }) { appState.updateMapLocalRule(saved) }
+                else { appState.addMapLocalRule(saved) }
+                editingRule = nil
+            } onCancel: { editingRule = nil }
+        }
+        .onAppear { checkDraftRule() }
+        .onChange(of: appState.draftMapLocalRule) { _, _ in checkDraftRule() }
+    }
+    
+    private func importYaml() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.yaml]
+        
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                do {
+                    let yamlString = try String(contentsOf: url, encoding: .utf8)
+                    let newRules = try MapLocalYamlTemplate.parse(yamlString: yamlString)
+                    appState.mapLocalRules.append(contentsOf: newRules)
+                    appState.saveMapLocalRules()
+                } catch {
+                    print("YAML Import Error: \(error)")
+                }
+            }
+        }
+    }
+    
+    private func checkDraftRule() {
+        if let draft = appState.draftMapLocalRule {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                appState.draftMapLocalRule = nil
+                editingRule = draft
+            }
+        }
+    }
+}
+
+struct MapLocalGroupHeader: View {
+    let groupName: String
+    let rules: [MapLocalRule]
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: groupName.isEmpty ? "folder.badge.minus" : "folder.fill")
+                .foregroundStyle(.blue)
+            Text(groupName.isEmpty ? "Uncategorized" : groupName)
+                .font(.headline)
+                .foregroundStyle(.primary)
+            Spacer()
+            
+            let allEnabled = rules.allSatisfy { $0.isEnabled }
+            
+            Button {
+                let ruleIds = Set(rules.map { $0.id })
+                appState.mapLocalRules.removeAll { ruleIds.contains($0.id) }
+                appState.saveMapLocalRules()
+            } label: {
+                Image(systemName: "trash")
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.plain)
+            .help("Delete Folder and all its rules")
+            
+            Toggle(allEnabled ? "" : "", isOn: Binding(
+                get: { allEnabled },
+                set: { val in
+                    var updatedRules = appState.mapLocalRules
+                    for rule in rules {
+                        if let idx = updatedRules.firstIndex(where: { $0.id == rule.id }) {
+                            updatedRules[idx].isEnabled = val
+                        }
+                    }
+                    appState.mapLocalRules = updatedRules
+                    appState.saveMapLocalRules()
+                }
+            ))
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 16)
+    }
+}
+
+struct MapLocalEditor: View {
+    @State var rule: MapLocalRule
+    let isNew: Bool
+    let onSave: (MapLocalRule) -> Void
+    let onCancel: () -> Void
+
+    private let methods = ["*", "GET", "POST", "PUT", "DELETE"]
+    private let contentTypes = ["application/json", "text/html", "text/plain", "text/xml", "application/xml", "image/png", "image/jpeg"]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(isNew ? "New Map Local" : "Edit Map Local").font(.title2.bold())
+                Spacer()
+                Button("Cancel") { onCancel() }.keyboardShortcut(.cancelAction)
+                Button("Save") { onSave(rule) }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+            }.padding().background(.bar)
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    LabeledField(label: "Name") { TextField("Rule name", text: $rule.name).textFieldStyle(.roundedBorder) }
+                    LabeledField(label: "Group / Folder") { TextField("Optional", text: $rule.group).textFieldStyle(.roundedBorder) }
+                    Toggle("Enabled", isOn: $rule.isEnabled)
+                    Divider()
+                    LabeledField(label: "URL Pattern") { TextField("*/api/config*", text: $rule.urlPattern).textFieldStyle(.roundedBorder).font(.body.monospaced()) }
+                    LabeledField(label: "HTTP Method") {
+                        Picker("", selection: $rule.httpMethod) {
+                            ForEach(methods, id: \.self) { Text($0 == "*" ? "Any" : $0).tag($0) }
+                        }.labelsHidden().frame(width: 150)
+                    }
+                    Divider()
+                    LabeledField(label: "Source") {
+                        Picker("", selection: $rule.source) {
+                            Text("Inline Text").tag(MapLocalRule.DataSource.inline)
+                            Text("Local File").tag(MapLocalRule.DataSource.file)
+                        }.pickerStyle(.segmented).frame(width: 250)
+                    }
+
+                    if rule.source == .file {
+                        LabeledField(label: "File Path") {
+                            HStack {
+                                TextField("/path/to/response.json", text: $rule.localFilePath).textFieldStyle(.roundedBorder).font(.body.monospaced())
+                                Button("Browse…") { browseFile() }.buttonStyle(.bordered)
+                            }
+                        }
+                    } else {
+                        LabeledField(label: "Response Body") {
+                            TextEditor(text: $rule.inlineBody)
+                                .font(.system(.body, design: .monospaced))
+                                .disableAutocorrection(true)
+                                .frame(height: 200)
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
+                                .onChange(of: rule.inlineBody) { newValue in
+                                    let fixed = newValue.replacingOccurrences(of: "“", with: "\"").replacingOccurrences(of: "”", with: "\"")
+                                    if fixed != newValue { rule.inlineBody = fixed }
+                                }
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    LabeledField(label: "Request Body Match") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            TextEditor(text: $rule.inlineRequestMatch)
+                                .font(.system(.body, design: .monospaced))
+                                .disableAutocorrection(true)
+                                .frame(height: 100)
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
+                                .onChange(of: rule.inlineRequestMatch) { newValue in
+                                    let fixed = newValue.replacingOccurrences(of: "“", with: "\"").replacingOccurrences(of: "”", with: "\"")
+                                    if fixed != newValue { rule.inlineRequestMatch = fixed }
+                                }
+                            Text("If provided, this rule will ONLY trigger if the incoming HTTP request body contains this exact text string.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    
+                    Divider()
+
+                    LabeledField(label: "Content-Type") {
+                        Picker("", selection: $rule.contentType) {
+                            ForEach(contentTypes, id: \.self) { Text($0).tag($0) }
+                        }.labelsHidden().frame(width: 250)
+                    }
+                    LabeledField(label: "Status Code") {
+                        TextField("200", value: $rule.statusCode, format: .number).textFieldStyle(.roundedBorder).frame(width: 100)
+                    }
+                }.padding(20)
+            }
+        }.frame(minWidth: 600, minHeight: 450)
+    }
+
+    private func browseFile() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                rule.localFilePath = url.path
+            }
+        }
+    }
+}
