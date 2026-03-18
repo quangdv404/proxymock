@@ -97,7 +97,7 @@ final class ProxyServer {
                 let engine = self.mockEngine
                 let mitmOn = self.mitmEnabled
 
-                DispatchQueue.global(qos: .userInitiated).async {
+                let thread = Thread {
                     let handler = ConnectionHandler(
                         clientFd: clientFd,
                         mockEngine: engine,
@@ -107,6 +107,8 @@ final class ProxyServer {
                     )
                     handler.handle()
                 }
+                thread.name = "ProxyMock.ConnectionHandler.\(clientFd)"
+                thread.start()
             }
         }
     }

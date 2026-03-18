@@ -289,16 +289,16 @@ final class ConnectionHandler: @unchecked Sendable {
         let host = request.host
         let port = request.port
 
-        let log = NetworkLog(
-            method: "CONNECT", url: "https://\(request.url)",
-            requestHeaders: request.headersDict,
-            requestBody: "CONNECT \(request.url) HTTP/1.1",
-            responseStatusCode: 200,
-            responseHeaders: ["Connection": "Established"],
-            responseBody: "🔒 HTTPS Tunnel (MITM disabled)\nHost: \(host)\nPort: \(port)\n\nEnable 'SSL Proxying' to see decrypted content.",
-            duration: Date().timeIntervalSince(startTime), isHTTPS: true
-        )
-        onLog(log)
+//        let log = NetworkLog(
+//            method: "CONNECT", url: "https://\(request.url)",
+//            requestHeaders: request.headersDict,
+//            requestBody: "CONNECT \(request.url) HTTP/1.1",
+//            responseStatusCode: 200,
+//            responseHeaders: ["Connection": "Established"],
+//            responseBody: "🔒 HTTPS Tunnel (MITM disabled)\nHost: \(host)\nPort: \(port)\n\nEnable 'SSL Proxying' to see decrypted content.",
+//            duration: Date().timeIntervalSince(startTime), isHTTPS: true
+//        )
+//        onLog(log)
 
         // Send 200 Connection Established
         _ = writeToSocket(clientFd, string: "HTTP/1.1 200 Connection Established\r\n\r\n")
@@ -397,7 +397,7 @@ final class ConnectionHandler: @unchecked Sendable {
         var responseData: Data?
 
         let session = sharedNoProxySession
-        session.dataTask(with: urlRequest) { [self] data, response, error in
+        session.dataTask(with: urlRequest) { data, response, error in
             let httpResponse = response as? HTTPURLResponse
             let statusCode = httpResponse?.statusCode ?? (error != nil ? 502 : 200)
             var headers: [String: String] = [:]
@@ -415,15 +415,15 @@ final class ConnectionHandler: @unchecked Sendable {
             let bodyData = data ?? Data()
             let bodyString = bodyData.loggableString
 
-            let log = NetworkLog(
-                method: request.method, url: request.fullURL,
-                requestHeaders: request.headersDict,
-                requestBody: request.body.loggableString,
-                responseStatusCode: statusCode, responseHeaders: headers,
-                responseBody: error != nil ? "Error: \(error!.localizedDescription)" : bodyString,
-                duration: Date().timeIntervalSince(startTime)
-            )
-            onLog(log)
+//            let log = NetworkLog(
+//                method: request.method, url: request.fullURL,
+//                requestHeaders: request.headersDict,
+//                requestBody: request.body.loggableString,
+//                responseStatusCode: statusCode, responseHeaders: headers,
+//                responseBody: error != nil ? "Error: \(error!.localizedDescription)" : bodyString,
+//                duration: Date().timeIntervalSince(startTime)
+//            )
+//            onLog(log)
 
             let finalBodyData = error != nil ? ("Error: \(error!.localizedDescription)".data(using: .utf8) ?? Data()) : bodyData
             responseData = HTTPParser.buildResponse(statusCode: statusCode, headers: headers, body: finalBodyData)
@@ -640,18 +640,20 @@ final class ConnectionHandler: @unchecked Sendable {
 
     private func relayBidirectional(fd1: Int32, fd2: Int32) {
         let group = DispatchGroup()
-
         group.enter()
-        DispatchQueue.global().async {
-            self.relayOneWay(from: fd1, to: fd2)
-            group.leave()
-        }
-
-        group.enter()
-        DispatchQueue.global().async {
+        
+        // Use one dedicated unmanaged thread for Server -> Client
+        let thread = Thread {
             self.relayOneWay(from: fd2, to: fd1)
             group.leave()
         }
+        thread.name = "ProxyMock.Relay.\(fd2).to.\(fd1)"
+        thread.start()
+
+        // Wait on the parent Client-Socket thread for Client -> Server
+        group.enter()
+        self.relayOneWay(from: fd1, to: fd2)
+        group.leave()
 
         group.wait()
     }

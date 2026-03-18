@@ -25,6 +25,10 @@ struct JSONEditorView: NSViewRepresentable {
         textView.isAutomaticTextReplacementEnabled = false
         textView.smartInsertDeleteEnabled = false
         
+        // Native Search capabilities (CMD+F)
+        textView.usesFindBar = true
+        textView.isIncrementalSearchingEnabled = true
+        
         // Important: Stop NSTextView from automatically wrapping text to window width!
         textView.isHorizontallyResizable = true
         textView.isVerticallyResizable = true

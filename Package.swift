@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "ProxyMock",
     platforms: [
-        .macOS(.v15)
+        .macOS(.v14)
     ],
     dependencies: [
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.2")

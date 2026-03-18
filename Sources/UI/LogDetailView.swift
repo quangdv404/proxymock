@@ -153,6 +153,7 @@ struct HeadersSection: View {
 struct BodySection: View {
     let title: String
     let content: String
+    @State private var text: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -165,16 +166,19 @@ struct BodySection: View {
                     .foregroundStyle(.secondary)
                     .italic()
             } else {
-                ScrollView(.horizontal, showsIndicators: true) {
-                    Text(prettyPrintedJSON(content))
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .padding(12)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                JSONEditorView(text: $text)
+                    .frame(minHeight: 200)
+                    .padding(4)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.3)))
             }
+        }
+        .onAppear {
+            text = prettyPrintedJSON(content)
+        }
+        .onChange(of: content) { newContent in
+            text = prettyPrintedJSON(newContent)
         }
     }
 
