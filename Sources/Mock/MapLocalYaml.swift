@@ -13,7 +13,6 @@ struct MapLocalYamlTemplate: Codable {
         let status: Int?
         let contentType: String?
         let body: String?
-        let requestMatch: String?
         let file: String?
         let delaySeconds: Double?
     }
@@ -46,7 +45,6 @@ struct MapLocalYamlTemplate: Codable {
                 newRule.source = .inline
                 newRule.inlineBody = rule.body ?? ""
             }
-            newRule.inlineRequestMatch = rule.requestMatch ?? ""
             newRule.delaySeconds = rule.delaySeconds ?? 0.0
             return newRule
         }

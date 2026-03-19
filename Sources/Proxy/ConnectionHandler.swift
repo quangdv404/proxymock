@@ -440,12 +440,6 @@ final class ConnectionHandler: @unchecked Sendable {
         for rule in config.mapLocalRules where rule.isEnabled {
             if rule.httpMethod != "*" && rule.httpMethod.uppercased() != method.uppercased() { continue }
             if matchesWildcard(url: url, pattern: rule.urlPattern) {
-                // If the rule specifies a request body match, check if it's present in the actual body
-                if !rule.inlineRequestMatch.isEmpty {
-                    if !requestBody.contains(rule.inlineRequestMatch) {
-                        continue
-                    }
-                }
                 return rule
             }
         }

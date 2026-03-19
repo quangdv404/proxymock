@@ -186,7 +186,13 @@ struct MapLocalEditor: View {
     let onCancel: () -> Void
 
     private let methods = ["*", "GET", "POST", "PUT", "DELETE"]
-    private let contentTypes = ["application/json", "text/html", "text/plain", "text/xml", "application/xml", "image/png", "image/jpeg"]
+    private let contentTypes = [
+        "application/json", "text/html", "text/plain", "text/xml", "application/xml", 
+        "image/png", "image/jpeg", "image/gif", "image/svg+xml", "image/webp", "text/css", 
+        "application/javascript", "text/csv", "application/pdf", "text/markdown", 
+        "application/zip", "audio/mpeg", "video/mp4",
+        "application/x-www-form-urlencoded", "multipart/form-data"
+    ]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -227,22 +233,17 @@ struct MapLocalEditor: View {
                         }
                     } else {
                         LabeledField(label: "Response Body") {
-                            JSONEditorView(text: $rule.inlineBody)
-                                .frame(height: 200)
-                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
-                        }
-                    }
-                    
-                    Divider()
-                    
-                    LabeledField(label: "Request Body Match") {
-                        VStack(alignment: .leading, spacing: 4) {
-                            JSONEditorView(text: $rule.inlineRequestMatch)
-                                .frame(height: 100)
-                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
-                            Text("If provided, this rule will ONLY trigger if the incoming HTTP request body contains this exact text string.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Spacer()
+                                    Button("Import from File...") { importFile() }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                }
+                                JSONEditorView(text: $rule.inlineBody)
+                                    .frame(height: 200)
+                                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
+                            }
                         }
                     }
                     
@@ -274,7 +275,63 @@ struct MapLocalEditor: View {
         panel.begin { response in
             if response == .OK, let url = panel.url {
                 rule.localFilePath = url.path
+                if let newType = detectContentType(from: url) {
+                    if !contentTypes.contains(newType) {
+                        rule.contentType = newType // Will still bind behind the scenes
+                    } else {
+                        rule.contentType = newType
+                    }
+                }
             }
+        }
+    }
+    
+    private func importFile() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                if let text = try? String(contentsOf: url, encoding: .utf8) {
+                    rule.inlineBody = text
+                } else {
+                    // Cannot be read as text (binary file like PDF/Image).
+                    // Automatically switch the rule mode to stream from disk!
+                    rule.source = .file
+                    rule.localFilePath = url.path
+                }
+                if let newType = detectContentType(from: url) {
+                    if !contentTypes.contains(newType) {
+                        rule.contentType = newType
+                    } else {
+                        rule.contentType = newType
+                    }
+                }
+            }
+        }
+    }
+    
+    private func detectContentType(from url: URL) -> String? {
+        let ext = url.pathExtension.lowercased()
+        switch ext {
+        case "json": return "application/json"
+        case "html", "htm": return "text/html"
+        case "txt": return "text/plain"
+        case "xml": return "application/xml"
+        case "png": return "image/png"
+        case "jpg", "jpeg": return "image/jpeg"
+        case "gif": return "image/gif"
+        case "svg": return "image/svg+xml"
+        case "webp": return "image/webp"
+        case "css": return "text/css"
+        case "js": return "application/javascript"
+        case "csv": return "text/csv"
+        case "pdf": return "application/pdf"
+        case "md", "markdown": return "text/markdown"
+        case "zip": return "application/zip"
+        case "mp3": return "audio/mpeg"
+        case "mp4": return "video/mp4"
+        default: return nil
         }
     }
 }

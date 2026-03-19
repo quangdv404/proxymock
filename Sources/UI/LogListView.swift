@@ -116,7 +116,6 @@ struct LogListView: View {
                                             newRule.httpMethod = log.method
                                             newRule.source = .inline
                                             newRule.inlineBody = log.responseBody
-                                            newRule.inlineRequestMatch = log.requestBody
                                             
                                             if let ct = log.responseHeaders["Content-Type"] {
                                                 newRule.contentType = ct.components(separatedBy: ";").first ?? "application/json"

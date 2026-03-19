@@ -16,7 +16,6 @@ struct MapLocalRule: Identifiable, Codable, Hashable, Sendable {
     var source: DataSource
     var localFilePath: String
     var inlineBody: String
-    var inlineRequestMatch: String
     
     var contentType: String
     var statusCode: Int
@@ -32,7 +31,6 @@ struct MapLocalRule: Identifiable, Codable, Hashable, Sendable {
         source: DataSource = .inline,
         localFilePath: String = "",
         inlineBody: String = "{\n  \"message\": \"success\"\n}",
-        inlineRequestMatch: String = "",
         contentType: String = "application/json",
         statusCode: Int = 200,
         delaySeconds: Double = 0.0
@@ -46,7 +44,6 @@ struct MapLocalRule: Identifiable, Codable, Hashable, Sendable {
         self.source = source
         self.localFilePath = localFilePath
         self.inlineBody = inlineBody
-        self.inlineRequestMatch = inlineRequestMatch
         self.contentType = contentType
         self.statusCode = statusCode
         self.delaySeconds = delaySeconds
