@@ -116,9 +116,13 @@ final class AppState {
         // Wire up logging
         proxyServer.onLog = { [weak self] log in
             Task { @MainActor in
-                self?.logs.insert(log, at: 0)
-                if let count = self?.logs.count, count > 100 {
-                    self?.logs = Array(self!.logs.prefix(100))
+                if let index = self?.logs.firstIndex(where: { $0.id == log.id }) {
+                    self?.logs[index] = log
+                } else {
+                    self?.logs.insert(log, at: 0)
+                    if let count = self?.logs.count, count > 100 {
+                        self?.logs = Array(self!.logs.prefix(100))
+                    }
                 }
             }
         }

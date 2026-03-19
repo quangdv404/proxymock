@@ -191,7 +191,11 @@ struct LogRowView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 4))
 
             // Status code
-            if let statusCode = log.responseStatusCode {
+            if log.isPending {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 35)
+            } else if let statusCode = log.responseStatusCode {
                 Text("\(statusCode)")
                     .font(.caption.monospaced().bold())
                     .foregroundStyle(statusColor(statusCode))
@@ -228,10 +232,17 @@ struct LogRowView: View {
             }
 
             // Duration
-            Text(String(format: "%.0fms", log.duration * 1000))
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-                .frame(width: 60, alignment: .trailing)
+            if log.isPending {
+                Text("...")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 60, alignment: .trailing)
+            } else {
+                Text(String(format: "%.0fms", log.duration * 1000))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 60, alignment: .trailing)
+            }
 
             // Timestamp
             Text(log.timestamp, style: .time)
@@ -265,11 +276,3 @@ struct LogRowView: View {
     }
 }
 
-extension NetworkLog: Hashable {
-    static func == (lhs: NetworkLog, rhs: NetworkLog) -> Bool {
-        lhs.id == rhs.id
-    }
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-    }
-}

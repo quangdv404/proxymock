@@ -216,14 +216,28 @@ struct SettingsView: View {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
         panel.nameFieldStringValue = "proxy_mock_rules.json"
-        panel.begin { response in
+        
+        let handler: (NSApplication.ModalResponse) -> Void = { response in
             if response == .OK, let url = panel.url {
+                let exportData = ProxyMockExport(
+                    mockRules: appState.mockEngine.allRules,
+                    mapLocalRules: appState.mapLocalRules,
+                    mapRemoteRules: appState.mapRemoteRules,
+                    domainFilterRules: appState.domainFilterRules,
+                    domainFilterMode: appState.domainFilterMode
+                )
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                if let data = try? encoder.encode(appState.mockEngine.allRules) {
+                if let data = try? encoder.encode(exportData) {
                     try? data.write(to: url, options: .atomic)
                 }
             }
+        }
+        
+        if let window = NSApplication.shared.windows.first(where: { $0.isKeyWindow }) ?? NSApplication.shared.windows.first {
+            panel.beginSheetModal(for: window, completionHandler: handler)
+        } else {
+            panel.begin(completionHandler: handler)
         }
     }
 
@@ -231,16 +245,69 @@ struct SettingsView: View {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
         panel.allowsMultipleSelection = false
-        panel.begin { response in
+        
+        let handler: (NSApplication.ModalResponse) -> Void = { response in
             if response == .OK, let url = panel.url {
-                if let data = try? Data(contentsOf: url),
-                   let rules = try? JSONDecoder().decode([MockRule].self, from: data) {
-                    for rule in rules {
-                        appState.mockEngine.addRule(rule)
+                if let data = try? Data(contentsOf: url) {
+                    let decoder = JSONDecoder()
+                    
+                    if let fullExport = try? decoder.decode(ProxyMockExport.self, from: data) {
+                        for rule in fullExport.mockRules {
+                            if !appState.mockEngine.allRules.contains(where: { $0.id == rule.id }) {
+                                appState.mockEngine.addRule(rule)
+                            }
+                        }
+                        appState.saveRules()
+                        
+                        for rule in fullExport.mapLocalRules {
+                            if !appState.mapLocalRules.contains(where: { $0.id == rule.id }) {
+                                appState.mapLocalRules.append(rule)
+                            }
+                        }
+                        appState.saveMapLocalRules()
+                        
+                        for rule in fullExport.mapRemoteRules {
+                            if !appState.mapRemoteRules.contains(where: { $0.id == rule.id }) {
+                                appState.mapRemoteRules.append(rule)
+                            }
+                        }
+                        appState.saveMapRemoteRules()
+                        
+                        for rule in fullExport.domainFilterRules {
+                            if !appState.domainFilterRules.contains(where: { $0.id == rule.id }) {
+                                appState.domainFilterRules.append(rule)
+                            }
+                        }
+                        if let mode = fullExport.domainFilterMode {
+                            appState.domainFilterMode = mode
+                        }
+                        appState.saveDomainFilters()
+                        
+                    } else if let mockRules = try? decoder.decode([MockRule].self, from: data) {
+                        for rule in mockRules {
+                            if !appState.mockEngine.allRules.contains(where: { $0.id == rule.id }) {
+                                appState.mockEngine.addRule(rule)
+                            }
+                        }
+                        appState.saveRules()
                     }
-                    appState.saveRules()
                 }
             }
         }
+        
+        if let window = NSApplication.shared.windows.first(where: { $0.isKeyWindow }) ?? NSApplication.shared.windows.first {
+            panel.beginSheetModal(for: window, completionHandler: handler)
+        } else {
+            panel.begin(completionHandler: handler)
+        }
     }
+}
+
+struct ProxyMockExport: Codable {
+    var version: Int = 1
+    var mockRules: [MockRule]
+    var mapLocalRules: [MapLocalRule]
+    var mapRemoteRules: [MapRemoteRule]
+    var domainFilterRules: [DomainFilterRule]
+    var domainFilterMode: DomainFilterMode?
 }

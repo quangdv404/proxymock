@@ -1,7 +1,7 @@
 import Foundation
 
 /// A logged network call
-struct NetworkLog: Identifiable, Sendable {
+struct NetworkLog: Identifiable, Sendable, Hashable {
     let id: UUID
     let timestamp: Date
     let method: String
@@ -14,6 +14,7 @@ struct NetworkLog: Identifiable, Sendable {
     let duration: TimeInterval
     let isMocked: Bool
     let isHTTPS: Bool
+    let isPending: Bool
 
     init(
         id: UUID = UUID(),
@@ -27,7 +28,8 @@ struct NetworkLog: Identifiable, Sendable {
         responseBody: String = "",
         duration: TimeInterval = 0,
         isMocked: Bool = false,
-        isHTTPS: Bool = false
+        isHTTPS: Bool = false,
+        isPending: Bool = false
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -41,6 +43,7 @@ struct NetworkLog: Identifiable, Sendable {
         self.duration = duration
         self.isMocked = isMocked
         self.isHTTPS = isHTTPS
+        self.isPending = isPending
     }
 }
 

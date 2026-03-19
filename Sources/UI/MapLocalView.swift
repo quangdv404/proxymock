@@ -18,6 +18,42 @@ struct MapLocalView: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Text("Map Local").font(.headline)
+                
+                if !appState.mapLocalRules.isEmpty {
+                    let allGroups = Set(groupedRules.map { $0.0 })
+                    let allCollapsed = expandedGroups.count == allGroups.count && !allGroups.isEmpty
+                    Button(action: {
+                        if allCollapsed {
+                            expandedGroups.removeAll()
+                        } else {
+                            expandedGroups = allGroups
+                        }
+                    }) {
+                        Text(allCollapsed ? "Expand All" : "Collapse All")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.link)
+                    .foregroundStyle(.secondary)
+                    
+                    Divider().frame(height: 12)
+                    
+                    let allEnabled = appState.mapLocalRules.allSatisfy { $0.isEnabled }
+                    Toggle("Enable All", isOn: Binding(
+                        get: { allEnabled },
+                        set: { val in
+                            var updatedRules = appState.mapLocalRules
+                            for i in updatedRules.indices {
+                                updatedRules[i].isEnabled = val
+                            }
+                            appState.mapLocalRules = updatedRules
+                            appState.saveMapLocalRules()
+                        }
+                    ))
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .font(.caption)
+                }
+                
                 Spacer()
                 
                 Button { importYaml() } label: { Label("Import YAML", systemImage: "square.and.arrow.down") }
@@ -91,7 +127,8 @@ struct MapLocalView: View {
             }
         }
         .sheet(item: $editingRule) { rule in
-            MapLocalEditor(rule: rule, isNew: !appState.mapLocalRules.contains { $0.id == rule.id }) { saved in
+            let groups = Array(Set(appState.mapLocalRules.map { $0.group.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })).sorted()
+            MapLocalEditor(rule: rule, existingGroups: groups, isNew: !appState.mapLocalRules.contains { $0.id == rule.id }) { saved in
                 if appState.mapLocalRules.contains(where: { $0.id == saved.id }) { appState.updateMapLocalRule(saved) }
                 else { appState.addMapLocalRule(saved) }
                 editingRule = nil
@@ -181,6 +218,7 @@ struct MapLocalGroupHeader: View {
 
 struct MapLocalEditor: View {
     @State var rule: MapLocalRule
+    let existingGroups: [String]
     let isNew: Bool
     let onSave: (MapLocalRule) -> Void
     let onCancel: () -> Void
@@ -207,7 +245,22 @@ struct MapLocalEditor: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     LabeledField(label: "Name") { TextField("Rule name", text: $rule.name).textFieldStyle(.roundedBorder) }
-                    LabeledField(label: "Group / Folder") { TextField("Optional", text: $rule.group).textFieldStyle(.roundedBorder) }
+                    LabeledField(label: "Group / Folder") {
+                        HStack {
+                            TextField("Optional", text: $rule.group).textFieldStyle(.roundedBorder)
+                            if !existingGroups.isEmpty {
+                                Menu {
+                                    ForEach(existingGroups, id: \.self) { group in
+                                        Button(group) { rule.group = group }
+                                    }
+                                } label: {
+                                    Image(systemName: "chevron.down")
+                                }
+                                .menuIndicator(.hidden)
+                                .fixedSize()
+                            }
+                        }
+                    }
                     Toggle("Enabled", isOn: $rule.isEnabled)
                     Divider()
                     LabeledField(label: "URL Pattern") { TextField("*/api/config*", text: $rule.urlPattern).textFieldStyle(.roundedBorder).font(.body.monospaced()) }

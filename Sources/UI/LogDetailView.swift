@@ -23,7 +23,11 @@ struct LogDetailView: View {
                         .background(methodColor(log.method))
                         .clipShape(RoundedRectangle(cornerRadius: 5))
 
-                    if let statusCode = log.responseStatusCode {
+                    if log.isPending {
+                        ProgressView()
+                            .controlSize(.small)
+                            .padding(.leading, 4)
+                    } else if let statusCode = log.responseStatusCode {
                         Text("\(statusCode)")
                             .font(.headline.monospaced())
                             .foregroundStyle(statusColor(statusCode))
@@ -41,9 +45,15 @@ struct LogDetailView: View {
 
                     Spacer()
 
-                    Text(String(format: "%.2fms", log.duration * 1000))
-                        .font(.callout.monospaced())
-                        .foregroundStyle(.secondary)
+                    if log.isPending {
+                        Text("...")
+                            .font(.callout.monospaced())
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(String(format: "%.2fms", log.duration * 1000))
+                            .font(.callout.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Text(log.url)

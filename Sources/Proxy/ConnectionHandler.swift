@@ -166,6 +166,16 @@ final class ConnectionHandler: @unchecked Sendable {
         let path = httpRequest.url.hasPrefix("/") ? httpRequest.url : "/\(httpRequest.url)"
         let fullURL = "https://\(host)\(port != 443 ? ":\(port)" : "")\(path)"
 
+        let logId = UUID()
+        let pendingLog = NetworkLog(
+            id: logId,
+            method: httpRequest.method, url: fullURL,
+            requestHeaders: httpRequest.headersDict,
+            requestBody: httpRequest.body.loggableString,
+            isPending: true
+        )
+        onLog(pendingLog)
+
         // 6. Check Map Local rules
         if let mapLocal = matchMapLocal(method: httpRequest.method, url: fullURL, requestBody: httpRequest.body.loggableString) {
             if mapLocal.delaySeconds > 0 {
@@ -174,6 +184,7 @@ final class ConnectionHandler: @unchecked Sendable {
             let responseBody = loadLocalResponse(rule: mapLocal)
             let headers = ["Content-Type": mapLocal.contentType, "X-ProxyMock-MapLocal": "true"]
             let log = NetworkLog(
+                id: logId,
                 method: httpRequest.method, url: fullURL,
                 requestHeaders: httpRequest.headersDict,
                 requestBody: httpRequest.body.loggableString,
@@ -190,6 +201,7 @@ final class ConnectionHandler: @unchecked Sendable {
         // 7. Check Mock rules
         if let mockRule = mockEngine.matchRule(method: httpRequest.method, url: fullURL, rules: config.mockRules) {
             let log = NetworkLog(
+                id: logId,
                 method: httpRequest.method, url: fullURL,
                 requestHeaders: httpRequest.headersDict,
                 requestBody: httpRequest.body.loggableString,
@@ -249,6 +261,7 @@ final class ConnectionHandler: @unchecked Sendable {
             let bodyString = bodyData.loggableString
 
             let log = NetworkLog(
+                id: logId,
                 method: httpRequest.method, url: fullURL,
                 requestHeaders: httpRequest.headersDict,
                 requestBody: httpRequest.body.loggableString,
@@ -319,6 +332,16 @@ final class ConnectionHandler: @unchecked Sendable {
 
     private func handleHTTPRequest(request: ParsedHTTPRequest, startTime: Date) {
         
+        let logId = UUID()
+        let pendingLog = NetworkLog(
+            id: logId,
+            method: request.method, url: request.fullURL,
+            requestHeaders: request.headersDict,
+            requestBody: request.body.loggableString,
+            isPending: true
+        )
+        onLog(pendingLog)
+
         // Check Map Local
         if let mapLocal = matchMapLocal(method: request.method, url: request.fullURL, requestBody: request.body.loggableString) {
             if mapLocal.delaySeconds > 0 {
@@ -326,11 +349,12 @@ final class ConnectionHandler: @unchecked Sendable {
             }
             let body = loadLocalResponse(rule: mapLocal)
             let headers = ["Content-Type": mapLocal.contentType]
-            let log = NetworkLog(method: request.method, url: request.fullURL,
-                                 requestHeaders: request.headersDict,
-                                 requestBody: request.body.loggableString,
-                                 responseStatusCode: mapLocal.statusCode, responseHeaders: headers,
-                                 responseBody: body.loggableString, duration: Date().timeIntervalSince(startTime), isMocked: true)
+            let log = NetworkLog(
+                id: logId, method: request.method, url: request.fullURL,
+                requestHeaders: request.headersDict,
+                requestBody: request.body.loggableString,
+                responseStatusCode: mapLocal.statusCode, responseHeaders: headers,
+                responseBody: body.loggableString, duration: Date().timeIntervalSince(startTime), isMocked: true)
             onLog(log)
             let resp = HTTPParser.buildResponse(statusCode: mapLocal.statusCode, headers: headers, body: body)
             _ = writeToSocket(clientFd, data: resp)
@@ -339,7 +363,7 @@ final class ConnectionHandler: @unchecked Sendable {
 
         // Check Mock rules
         if let mockRule = mockEngine.matchRule(method: request.method, url: request.fullURL, rules: config.mockRules) {
-            handleMockedResponse(request: request, rule: mockRule, startTime: startTime)
+            handleMockedResponse(request: request, rule: mockRule, logId: logId, startTime: startTime)
             return
         }
 
@@ -352,15 +376,16 @@ final class ConnectionHandler: @unchecked Sendable {
         }
 
         // Forward
-        forwardHTTPRequest(request: request, targetURL: targetURL, startTime: startTime)
+        forwardHTTPRequest(request: request, targetURL: targetURL, logId: logId, startTime: startTime)
     }
 
-    private func handleMockedResponse(request: ParsedHTTPRequest, rule: MockRule, startTime: Date) {
+    private func handleMockedResponse(request: ParsedHTTPRequest, rule: MockRule, logId: UUID, startTime: Date) {
         if rule.delaySeconds > 0 {
             Thread.sleep(forTimeInterval: rule.delaySeconds)
         }
 
         let log = NetworkLog(
+            id: logId,
             method: request.method, url: request.fullURL,
             requestHeaders: request.headersDict,
             requestBody: request.body.loggableString,
@@ -375,7 +400,7 @@ final class ConnectionHandler: @unchecked Sendable {
         _ = writeToSocket(clientFd, data: resp)
     }
 
-    private func forwardHTTPRequest(request: ParsedHTTPRequest, targetURL: String, startTime: Date) {
+    private func forwardHTTPRequest(request: ParsedHTTPRequest, targetURL: String, logId: UUID? = nil, startTime: Date) {
         guard let url = URL(string: targetURL) else {
             let errorBody = "Bad Gateway: Invalid URL".data(using: .utf8) ?? Data()
             let resp = HTTPParser.buildResponse(statusCode: 502, headers: ["Content-Type": "text/plain"], body: errorBody)
@@ -397,7 +422,7 @@ final class ConnectionHandler: @unchecked Sendable {
         var responseData: Data?
 
         let session = sharedNoProxySession
-        session.dataTask(with: urlRequest) { data, response, error in
+        session.dataTask(with: urlRequest) { [weak self] data, response, error in
             let httpResponse = response as? HTTPURLResponse
             let statusCode = httpResponse?.statusCode ?? (error != nil ? 502 : 200)
             var headers: [String: String] = [:]
@@ -415,15 +440,18 @@ final class ConnectionHandler: @unchecked Sendable {
             let bodyData = data ?? Data()
             let bodyString = bodyData.loggableString
 
-//            let log = NetworkLog(
-//                method: request.method, url: request.fullURL,
-//                requestHeaders: request.headersDict,
-//                requestBody: request.body.loggableString,
-//                responseStatusCode: statusCode, responseHeaders: headers,
-//                responseBody: error != nil ? "Error: \(error!.localizedDescription)" : bodyString,
-//                duration: Date().timeIntervalSince(startTime)
-//            )
-//            onLog(log)
+            if let logId = logId {
+                let log = NetworkLog(
+                    id: logId,
+                    method: request.method, url: request.fullURL,
+                    requestHeaders: request.headersDict,
+                    requestBody: request.body.loggableString,
+                    responseStatusCode: statusCode, responseHeaders: headers,
+                    responseBody: error != nil ? "Error: \(error!.localizedDescription)" : bodyString,
+                    duration: Date().timeIntervalSince(startTime)
+                )
+                self?.onLog(log)
+            }
 
             let finalBodyData = error != nil ? ("Error: \(error!.localizedDescription)".data(using: .utf8) ?? Data()) : bodyData
             responseData = HTTPParser.buildResponse(statusCode: statusCode, headers: headers, body: finalBodyData)
