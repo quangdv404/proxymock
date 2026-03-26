@@ -173,6 +173,7 @@ final class AppState {
     // MARK: - Map Local
     func saveMapLocalRules() { FeatureStore.saveMapLocal(mapLocalRules) }
     func addMapLocalRule(_ rule: MapLocalRule) { mapLocalRules.append(rule); saveMapLocalRules() }
+    func addMapLocalRules(_ rules: [MapLocalRule]) { mapLocalRules.append(contentsOf: rules); saveMapLocalRules() }
     func deleteMapLocalRule(id: UUID) { mapLocalRules.removeAll { $0.id == id }; saveMapLocalRules() }
     func updateMapLocalRule(_ rule: MapLocalRule) {
         if let i = mapLocalRules.firstIndex(where: { $0.id == rule.id }) { mapLocalRules[i] = rule; saveMapLocalRules() }

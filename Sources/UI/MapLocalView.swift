@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct MapLocalView: View {
     @Environment(AppState.self) private var appState
@@ -286,17 +287,7 @@ struct MapLocalEditor: View {
                         }
                     } else {
                         LabeledField(label: "Response Body") {
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Spacer()
-                                    Button("Import from File...") { importFile() }
-                                        .buttonStyle(.bordered)
-                                        .controlSize(.small)
-                                }
-                                JSONEditorView(text: $rule.inlineBody)
-                                    .frame(height: 200)
-                                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
-                            }
+                            InlineBodyEditor(text: $rule.inlineBody, onImport: importFile)
                         }
                     }
                     
@@ -385,6 +376,131 @@ struct MapLocalEditor: View {
         case "mp3": return "audio/mpeg"
         case "mp4": return "video/mp4"
         default: return nil
+        }
+    }
+}
+
+// MARK: - Inline Body Editor
+
+/// A self-contained response body editor with format, validity, and char-count toolbar.
+struct InlineBodyEditor: View {
+    @Binding var text: String
+    let onImport: () -> Void
+
+    @State private var editorHeight: CGFloat = 300
+    @State private var dragStartHeight: CGFloat = 300
+
+    private var isValidJSON: Bool {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return true }
+        guard let data = text.data(using: .utf8) else { return false }
+        return (try? JSONSerialization.jsonObject(with: data)) != nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // ── Toolbar ──────────────────────────────────────────────────────
+            HStack(spacing: 10) {
+                // Validity badge
+                let valid = isValidJSON
+                HStack(spacing: 4) {
+                    Image(systemName: valid ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(valid ? .green : .red)
+                    Text(valid ? "Valid JSON" : "Invalid JSON")
+                        .font(.caption.bold())
+                        .foregroundStyle(valid ? .green : .red)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background((valid ? Color.green : Color.red).opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                Spacer()
+
+                // Character count
+                Text("\(text.count) chars")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.tertiary)
+
+                Divider().frame(height: 14)
+
+                // Format button
+                Button {
+                    formatJSON()
+                } label: {
+                    Label("Format", systemImage: "text.alignleft")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!isValidJSON || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                // Import from file
+                Button {
+                    onImport()
+                } label: {
+                    Label("Import File", systemImage: "square.and.arrow.down")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color(nsColor: .windowBackgroundColor))
+            .overlay(Rectangle().frame(height: 1).foregroundStyle(Color.secondary.opacity(0.2)), alignment: .bottom)
+
+            // ── Editor ───────────────────────────────────────────────────────
+            JSONEditorView(text: $text)
+                .frame(height: editorHeight)
+                .background(Color(nsColor: .textBackgroundColor))
+
+            // ── Resize Handle ────────────────────────────────────────────────
+            ResizeHandle()
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            let newH = max(120, dragStartHeight + value.translation.height)
+                            editorHeight = newH
+                        }
+                        .onEnded { value in
+                            dragStartHeight = editorHeight
+                        }
+                )
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.25)))
+    }
+
+    private func formatJSON() {
+        guard let data = text.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data),
+              let pretty = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]),
+              let str = String(data: pretty, encoding: .utf8) else { return }
+        text = str
+    }
+}
+
+/// A thin draggable resize handle bar.
+struct ResizeHandle: View {
+    var body: some View {
+        ZStack {
+            Color(nsColor: .windowBackgroundColor)
+            HStack(spacing: 3) {
+                ForEach(0..<3, id: \.self) { _ in
+                    RoundedRectangle(cornerRadius: 1)
+                        .frame(width: 20, height: 2)
+                        .foregroundStyle(Color.secondary.opacity(0.4))
+                }
+            }
+        }
+        .frame(height: 12)
+        .overlay(Rectangle().frame(height: 1).foregroundStyle(Color.secondary.opacity(0.15)), alignment: .top)
+        .onHover { inside in
+            if inside {
+                NSCursor.resizeUpDown.push()
+            } else {
+                NSCursor.pop()
+            }
         }
     }
 }

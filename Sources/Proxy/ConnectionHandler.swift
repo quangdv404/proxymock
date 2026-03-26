@@ -52,7 +52,7 @@ final class ConnectionHandler: @unchecked Sendable {
     /// Main entry point — reads request, routes to handler
     func handle() {
         defer { Darwin.close(clientFd) }
-        Logger(subsystem: "ProxyMock", category: "ProxyMock.Lock").error("fire")
+        
         guard let requestData = readFullHTTPRequest(fd: clientFd),
               let request = HTTPParser.parseRequest(from: requestData.completeData) else {
             return
@@ -229,7 +229,7 @@ final class ConnectionHandler: @unchecked Sendable {
         urlRequest.httpMethod = httpRequest.method
         for (key, value) in httpRequest.headers {
             let lk = key.lowercased()
-            if lk == "proxy-connection" || lk == "proxy-authorization" || lk == "host" { continue }
+            if lk == "proxy-connection" || lk == "proxy-authorization" || lk == "host" || lk == "content-length" || lk == "transfer-encoding" { continue }
             urlRequest.setValue(value, forHTTPHeaderField: key)
         }
         urlRequest.setValue(host, forHTTPHeaderField: "Host")
@@ -412,7 +412,7 @@ final class ConnectionHandler: @unchecked Sendable {
         urlRequest.httpMethod = request.method
         for (key, value) in request.headers {
             let lk = key.lowercased()
-            if lk == "proxy-connection" || lk == "proxy-authorization" { continue }
+            if lk == "proxy-connection" || lk == "proxy-authorization" || lk == "host" || lk == "content-length" || lk == "transfer-encoding" { continue }
             urlRequest.setValue(value, forHTTPHeaderField: key)
         }
         if !request.body.isEmpty { urlRequest.httpBody = request.body }
@@ -514,6 +514,8 @@ final class ConnectionHandler: @unchecked Sendable {
         var completeData = Data()
         var overflowData = Data()
         var expectedContentLength: Int? = nil
+        var isChunked = false
+        var needs100Continue = false
         var headersParsed = false
         var bodyStartOffset = 0
         var isConnectMethod = false
@@ -568,9 +570,22 @@ final class ConnectionHandler: @unchecked Sendable {
                         }
 
                         for (key, value) in request.headers {
-                            if key.lowercased() == "content-length", let cl = Int(value) {
+                            let lk = key.lowercased()
+                            if lk == "content-length", let cl = Int(value) {
                                 expectedContentLength = cl
-                                break
+                            } else if lk == "transfer-encoding" && value.lowercased().contains("chunked") {
+                                isChunked = true
+                            } else if lk == "expect" && value.lowercased() == "100-continue" {
+                                needs100Continue = true
+                            }
+                        }
+                        
+                        if needs100Continue {
+                            let continueData = "HTTP/1.1 100 Continue\r\n\r\n".data(using: .utf8)!
+                            if let ctx = sslContext {
+                                sslWrite(ctx, data: continueData)
+                            } else if let cFd = fd {
+                                writeToSocket(cFd, data: continueData)
                             }
                         }
                     }
@@ -588,6 +603,15 @@ final class ConnectionHandler: @unchecked Sendable {
                         }
                         break
                     }
+                } else if isChunked {
+                    let (complete, overflow) = isChunkedStreamComplete(data: completeData, bodyStart: bodyStartOffset)
+                    if complete {
+                        overflowData = overflow
+                        if !overflow.isEmpty {
+                            completeData = completeData.dropLast(overflow.count)
+                        }
+                        break
+                    }
                 } else {
                     break
                 }
@@ -595,6 +619,41 @@ final class ConnectionHandler: @unchecked Sendable {
         }
         
         return completeData.isEmpty ? nil : (completeData, overflowData)
+    }
+
+    private func isChunkedStreamComplete(data: Data, bodyStart: Int) -> (isComplete: Bool, overflow: Data) {
+        var offset = bodyStart
+        let bytes = [UInt8](data)
+        while offset < bytes.count {
+            guard let crlfIndex = bytes[offset...].firstIndex(of: 0x0D),
+                  crlfIndex + 1 < bytes.count,
+                  bytes[crlfIndex + 1] == 0x0A else {
+                return (false, Data())
+            }
+            
+            let hexEnd = crlfIndex
+            let hexBytes = bytes[offset..<hexEnd]
+            let rawHexString = String(bytes: hexBytes, encoding: .utf8)?.trimmingCharacters(in: .whitespaces) ?? ""
+            let hexString = rawHexString.components(separatedBy: ";")[0].trimmingCharacters(in: .whitespaces)
+            guard let chunkSize = Int(hexString, radix: 16) else {
+                return (true, Data())
+            }
+            
+            if chunkSize == 0 {
+                let endOffset = crlfIndex + 4
+                if endOffset <= bytes.count {
+                    return (true, data.subdata(in: endOffset..<bytes.count))
+                } else {
+                    return (false, Data())
+                }
+            }
+            
+            offset = crlfIndex + 2 + chunkSize + 2
+            if offset > bytes.count {
+                return (false, Data())
+            }
+        }
+        return (false, Data())
     }
 
     private func findHeaderEnd(in data: Data) -> Int? {

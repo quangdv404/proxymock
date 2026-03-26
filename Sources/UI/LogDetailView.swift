@@ -164,6 +164,8 @@ struct BodySection: View {
     let title: String
     let content: String
     @State private var text: String = ""
+    @State private var editorHeight: CGFloat = 240
+    @State private var dragStartHeight: CGFloat = 240
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -176,23 +178,34 @@ struct BodySection: View {
                     .foregroundStyle(.secondary)
                     .italic()
             } else {
-                JSONEditorView(text: $text)
-                    .frame(minHeight: 200)
-                    .padding(4)
-                    .background(Color(nsColor: .textBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.3)))
+                VStack(spacing: 0) {
+                    JSONEditorView(text: $text)
+                        .frame(height: editorHeight)
+                        .background(Color(nsColor: .textBackgroundColor))
+
+                    ResizeHandle()
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    editorHeight = max(80, dragStartHeight + value.translation.height)
+                                }
+                                .onEnded { _ in
+                                    dragStartHeight = editorHeight
+                                }
+                        )
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.25)))
             }
         }
         .onAppear {
             text = prettyPrintedJSON(content)
         }
-        .onChange(of: content) { newContent in
+        .onChange(of: content) { _, newContent in
             text = prettyPrintedJSON(newContent)
         }
     }
 
-    /// Try to pretty-print JSON; if not valid JSON, return raw string
     private func prettyPrintedJSON(_ string: String) -> String {
         guard let data = string.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data),
