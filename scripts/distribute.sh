@@ -35,7 +35,7 @@ mkdir -p "$DIST_DIR/$APP_NAME"
 cp -R "$APP_BUNDLE" "$DIST_DIR/$APP_NAME/"
 
 # Create the fix script
-FIX_SCRIPT="$DIST_DIR/$APP_NAME/Fix_ProxyMock_Firewall.command"
+FIX_SCRIPT="$DIST_DIR/$APP_NAME/Fix_ProxyMock_Firewall.sh"
 cat > "$FIX_SCRIPT" << 'EOF'
 #!/bin/bash
 set -e
