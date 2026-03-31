@@ -221,7 +221,7 @@ final class AppState {
         let startTime = Date()
         let noProxyCfg = URLSessionConfiguration.ephemeral
         noProxyCfg.connectionProxyDictionary = [:]
-        let session = URLSession(configuration: noProxyCfg)
+        let session = URLSession(configuration: noProxyCfg, delegate: ComposeSessionDelegate(), delegateQueue: nil)
         
         session.dataTask(with: request) { [weak self] data, response, error in
             defer { session.finishTasksAndInvalidate() }
@@ -277,5 +277,11 @@ final class AppState {
             }
         }
         return address
+    }
+}
+
+private final class ComposeSessionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
 }

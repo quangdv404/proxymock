@@ -11,8 +11,17 @@ private let noProxyConfig: URLSessionConfiguration = {
     return config
 }()
 
+private final class ProxySessionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        // Refuse redirect so that the 3xx response is returned natively to the client
+        completionHandler(nil)
+    }
+}
+
+private let proxySessionDelegate = ProxySessionDelegate()
+
 /// Shared URLSession that bypasses system proxies
-private let sharedNoProxySession = URLSession(configuration: noProxyConfig)
+private let sharedNoProxySession = URLSession(configuration: noProxyConfig, delegate: proxySessionDelegate, delegateQueue: nil)
 
 /// Wraps the socket file descriptor and any leftover bytes (like TLS ClientHello) 
 /// so SecureTransport can consume them before blocking on the socket.
