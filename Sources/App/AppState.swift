@@ -28,6 +28,11 @@ final class AppState {
     var logSearchText: String = ""
     var logMethodFilter: String = "ALL"
     
+    // Log batching
+    nonisolated(unsafe) private var pendingLogs: [NetworkLog] = []
+    private let pendingLogsLock = NSLock()
+    private var logUpdateTimer: Timer?
+    
     // Throttle
     var throttleProfile: ThrottleProfile = ThrottleProfile.presets[0]
     var isThrottleEnabled: Bool = false
@@ -113,19 +118,45 @@ final class AppState {
             )
         }
 
-        // Wire up logging
-        proxyServer.onLog = { [weak self] log in
-            Task { @MainActor in
-                if let index = self?.logs.firstIndex(where: { $0.id == log.id }) {
-                    self?.logs[index] = log
-                } else {
-                    self?.logs.insert(log, at: 0)
-                    if let count = self?.logs.count, count > 100 {
-                        self?.logs = Array(self!.logs.prefix(100))
-                    }
+        // Start log batching timer
+        Task { @MainActor [weak self] in
+            self?.logUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+                Task { @MainActor in
+                    self?.flushLogBuffer()
                 }
             }
         }
+
+        // Wire up logging
+        proxyServer.onLog = { [weak self] log in
+            guard let self = self else { return }
+            self.pendingLogsLock.lock()
+            self.pendingLogs.append(log)
+            self.pendingLogsLock.unlock()
+        }
+    }
+
+    @MainActor
+    private func flushLogBuffer() {
+        pendingLogsLock.lock()
+        let toProcess = pendingLogs
+        pendingLogs.removeAll()
+        pendingLogsLock.unlock()
+        
+        guard !toProcess.isEmpty else { return }
+        
+        var newLogs = self.logs
+        for log in toProcess {
+            if let index = newLogs.firstIndex(where: { $0.id == log.id }) {
+                newLogs[index] = log
+            } else {
+                newLogs.insert(log, at: 0)
+            }
+        }
+        if newLogs.count > 100 {
+            newLogs = Array(newLogs.prefix(100))
+        }
+        self.logs = newLogs
     }
 
     var isRunning: Bool { proxyServer.isRunning }
@@ -252,9 +283,9 @@ final class AppState {
                 responseBody: error != nil ? "Error: \(error!.localizedDescription)" : bodyString,
                 duration: Date().timeIntervalSince(startTime)
             )
-            Task { @MainActor in
-                self?.logs.insert(log, at: 0)
-            }
+            self?.pendingLogsLock.lock()
+            self?.pendingLogs.append(log)
+            self?.pendingLogsLock.unlock()
         }.resume()
     }
 
