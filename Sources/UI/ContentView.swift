@@ -71,6 +71,8 @@ struct ContentView: View {
                 ThrottleView()
             case .compose:
                 ComposeView()
+            case .push:
+                PushNotificationView()
             case .settings:
                 SettingsView()
             }

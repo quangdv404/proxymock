@@ -9,6 +9,7 @@ final class AppState {
     var mockEngine: MockEngine
     var breakpointManager: BreakpointManager
     var certManager: CertificateManager
+    var pushEngine = PushNotificationEngine()
     var logs: [NetworkLog] = []
     var port: UInt16 = 9090
     var autoStart: Bool = false
@@ -61,6 +62,7 @@ final class AppState {
         case domainFilter = "Block/Allow"
         case throttle = "Throttle"
         case compose = "Compose"
+        case push = "Push Notifications"
         case settings = "Settings"
 
         var id: String { rawValue }
@@ -76,6 +78,7 @@ final class AppState {
             case .domainFilter: return "shield.lefthalf.filled"
             case .throttle: return "speedometer"
             case .compose: return "paperplane"
+            case .push: return "bell.badge"
             case .settings: return "gear"
             }
         }
