@@ -1,5 +1,8 @@
 import Foundation
 import Security
+import os.log
+
+private let certLog = Logger(subsystem: "ProxyMock", category: "CertMgr")
 
 /// Manages CA and per-host certificates for HTTPS MITM interception.
 /// Uses the `openssl` CLI (available as LibreSSL on macOS) for cert generation.
@@ -30,7 +33,8 @@ final class CertificateManager {
             /usr/bin/openssl x509 -in "\(CertPaths.caCertPath)" -outform der -out "\(CertPaths.caCertDERPath)" 2>&1
             """)
         isCAGenerated = FileManager.default.fileExists(atPath: CertPaths.caCertPath) && FileManager.default.fileExists(atPath: CertPaths.caCertDERPath)
-        print("[CertMgr] CA generated: \(isCAGenerated)")
+        let generated = isCAGenerated
+        certLog.info("CA generated: \(generated)")
         return isCAGenerated
     }
 
@@ -51,29 +55,52 @@ final class CertificateManager {
 
 /// Thread-safe certificate path and generation helpers (can be called from any thread)
 enum CertPaths: Sendable {
-    static var baseDir: URL {
+    // Computed once at first access (safe: Swift static let is lazily initialized under a lock).
+    // Previously these were computed `var` properties that called FileManager.urls(for:) on every
+    // access — including from hundreds of concurrent background proxy threads — which triggered a
+    // SIGTRAP inside Foundation's _DarwinSearchPaths and caused an infinite signal-handler loop.
+    static let baseDir: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             .appendingPathComponent("ProxyMock/Certs", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
-    }
+    }()
 
-    static var hostsDir: URL {
+    static let hostsDir: URL = {
         let dir = baseDir.appendingPathComponent("hosts", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
-    }
+    }()
 
-    static var caKeyPath: String { baseDir.appendingPathComponent("ca-key.pem").path }
-    static var caCertPath: String { baseDir.appendingPathComponent("ca.pem").path }
-    static var caCertDERPath: String { baseDir.appendingPathComponent("ca.cer").path }
-    static var caCertURL: URL { baseDir.appendingPathComponent("ca.pem") }
-    static var caCertDERURL: URL { baseDir.appendingPathComponent("ca.cer") }
+    static let caKeyPath: String = baseDir.appendingPathComponent("ca-key.pem").path
+    static let caCertPath: String = baseDir.appendingPathComponent("ca.pem").path
+    static let caCertDERPath: String = baseDir.appendingPathComponent("ca.cer").path
+    static let caCertURL: URL = baseDir.appendingPathComponent("ca.pem")
+    static let caCertDERURL: URL = baseDir.appendingPathComponent("ca.cer")
 
-    /// Get or generate a PKCS12 certificate for a hostname (thread-safe)
+    // MARK: - Identity Cache
+    // SecPKCS12Import is NOT thread-safe under concurrent load — calling it from hundreds of
+    // simultaneous proxy threads causes _CFRuntimeCreateInstance to crash inside the Security
+    // framework. We cache the loaded SecIdentity per-hostname under a lock so the expensive
+    // (and non-reentrant) import path is only executed once per host.
+    private static let identityLock = NSLock()
+    // nonisolated(unsafe): manually protected by identityLock above
+    private nonisolated(unsafe) static var identityCache: [String: SecIdentity] = [:]
+
+    /// Get or generate a PKCS12 certificate for a hostname (thread-safe).
+    /// Serialized under identityLock to prevent concurrent generateHostCert calls for
+    /// the same host (which would race on openssl output files and corrupt the P12).
     static func getP12Path(for host: String) -> String? {
         let hostDir = hostsDir.appendingPathComponent(host)
         let p12Path = hostDir.appendingPathComponent("cert.p12").path
+
+        // Fast path: cert already exists — no lock needed for read-only file check
+        if FileManager.default.fileExists(atPath: p12Path) { return p12Path }
+
+        // Slow path: generate under lock so only one thread generates per host at a time
+        identityLock.lock()
+        defer { identityLock.unlock() }
+        // Re-check — another thread may have generated it while we waited
         if FileManager.default.fileExists(atPath: p12Path) { return p12Path }
         return generateHostCert(for: host)
     }
@@ -103,15 +130,35 @@ enum CertPaths: Sendable {
             """)
 
         if FileManager.default.fileExists(atPath: p12Path) {
-            print("[CertMgr] Generated cert for \(host)")
+            certLog.info("Generated cert for \(host, privacy: .public)")
+            // Evict stale cache entry so the new cert gets loaded fresh next time
+            identityLock.lock()
+            identityCache.removeValue(forKey: p12Path)
+            identityLock.unlock()
             return p12Path
         }
-        print("[CertMgr] ❌ Failed to generate cert for \(host)")
+        certLog.error("❌ Failed to generate cert for \(host, privacy: .public)")
         return nil
     }
 
-    /// Load a SecIdentity from a PKCS12 file
+    /// Load a SecIdentity from a PKCS12 file — cached and serialized to prevent concurrent
+    /// SecPKCS12Import calls which crash inside the Security framework (_CFRuntimeCreateInstance).
     static func loadIdentity(from p12Path: String) -> SecIdentity? {
+        // Fast path: return cached identity
+        identityLock.lock()
+        if let cached = identityCache[p12Path] {
+            identityLock.unlock()
+            return cached
+        }
+        identityLock.unlock()
+
+        // Slow path: import under lock so only one thread calls SecPKCS12Import at a time
+        identityLock.lock()
+        defer { identityLock.unlock() }
+
+        // Re-check after acquiring lock (another thread may have populated it)
+        if let cached = identityCache[p12Path] { return cached }
+
         guard let p12Data = try? Data(contentsOf: URL(fileURLWithPath: p12Path)) else { return nil }
         var importedItems: CFArray?
         let options = [kSecImportExportPassphrase: "proxymock"] as CFDictionary
@@ -120,7 +167,9 @@ enum CertPaths: Sendable {
               let items = importedItems as? [[String: Any]],
               let firstItem = items.first,
               let identity = firstItem[kSecImportItemIdentity as String] else { return nil }
-        return (identity as! SecIdentity)
+        let secIdentity = identity as! SecIdentity
+        identityCache[p12Path] = secIdentity
+        return secIdentity
     }
 
     static func shell(_ command: String) -> String {

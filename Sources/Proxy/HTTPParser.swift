@@ -106,7 +106,15 @@ enum HTTPParser {
         }
 
         let bodyStart = headerEnd + 4  // Skip \r\n\r\n
-        let body = bodyStart < data.count ? data.suffix(from: bodyStart) : Data()
+        // IMPORTANT: data.suffix(from:) returns a slice with non-zero startIndex.
+        // We MUST copy into a fresh Data to reset startIndex to 0, otherwise
+        // URLRequest.httpBody's NSData bridge silently drops the body bytes.
+        let body: Data
+        if bodyStart < data.count {
+            body = Data(data[bodyStart...])
+        } else {
+            body = Data()
+        }
 
         return ParsedHTTPRequest(
             method: method,

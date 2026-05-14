@@ -102,9 +102,17 @@ struct APNsComposerView: View {
 
             // ----- Message -----
             Section("Message") {
-                TextField("Device Token (hex, 64 chars)", text: $deviceToken)
-                    .font(.caption.monospaced())
-                    .onChange(of: deviceToken) { _, _ in saveMessageCache() }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Device Tokens (comma or newline separated)").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $deviceToken)
+                        .font(.caption.monospaced())
+                        .frame(minHeight: 60, maxHeight: 120)
+                        .scrollContentBackground(.hidden)
+                        .background(Color(.textBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(.separatorColor)))
+                        .onChange(of: deviceToken) { _, _ in saveMessageCache() }
+                }
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -223,7 +231,18 @@ struct APNsComposerView: View {
             engine.lastError = "Payload JSON is empty"
             return
         }
-        Task { await engine.sendAPNs(deviceToken: deviceToken, payloadJSON: payloadJSON) }
+        
+        let tokens = deviceToken
+            .components(separatedBy: CharacterSet(charactersIn: ",\n"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            
+        guard !tokens.isEmpty else {
+            engine.lastError = "Provide at least one device token"
+            return
+        }
+        
+        Task { await engine.sendAPNs(deviceTokens: tokens, payloadJSON: payloadJSON) }
     }
 
     private func titleFromJSON(_ json: String) -> String? {
@@ -281,9 +300,17 @@ struct FCMComposerView: View {
 
             // ----- Message -----
             Section("Message") {
-                TextField("FCM Device Token", text: $deviceToken)
-                    .font(.caption.monospaced())
-                    .onChange(of: deviceToken) { _, _ in saveMessageCache() }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("FCM Device Tokens (comma or newline separated)").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $deviceToken)
+                        .font(.caption.monospaced())
+                        .frame(minHeight: 60, maxHeight: 120)
+                        .scrollContentBackground(.hidden)
+                        .background(Color(.textBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(.separatorColor)))
+                        .onChange(of: deviceToken) { _, _ in saveMessageCache() }
+                }
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -403,7 +430,18 @@ struct FCMComposerView: View {
             engine.lastError = "Payload JSON is empty"
             return
         }
-        Task { await engine.sendFCM(deviceToken: deviceToken, payloadJSON: payloadJSON) }
+        
+        let tokens = deviceToken
+            .components(separatedBy: CharacterSet(charactersIn: ",\n"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            
+        guard !tokens.isEmpty else {
+            engine.lastError = "Provide at least one device token"
+            return
+        }
+        
+        Task { await engine.sendFCM(deviceTokens: tokens, payloadJSON: payloadJSON) }
     }
 
     private func titleFromJSON(_ json: String) -> String? {

@@ -2,6 +2,8 @@ import Foundation
 import os.log
 import Security
 
+private let mitmLog = Logger(subsystem: "ProxyMock", category: "MITM")
+
 /// URLSession config that bypasses system proxy to prevent forwarding loops
 private let noProxyConfig: URLSessionConfiguration = {
     let config = URLSessionConfiguration.ephemeral
@@ -124,7 +126,7 @@ final class ConnectionHandler: @unchecked Sendable {
         // 1. Get/generate certificate for this host
         guard let p12Path = CertPaths.getP12Path(for: host),
               let identity = CertPaths.loadIdentity(from: p12Path) else {
-            print("[MITM] Failed to get cert for \(host), falling back to tunnel")
+            mitmLog.error("Failed to get cert for \(host, privacy: .public), falling back to tunnel")
             handleConnectTunnel(request: request, overflowData: overflowData, startTime: startTime)
             return
         }
@@ -135,7 +137,7 @@ final class ConnectionHandler: @unchecked Sendable {
 
         // 3. Create SSL context (server side — we act as the HTTPS server to the client)
         guard let sslContext = SSLCreateContext(nil, .serverSide, .streamType) else {
-            print("[MITM] Failed to create SSL context")
+            mitmLog.error("Failed to create SSL context")
             return
         }
         defer { SSLClose(sslContext) }
@@ -160,14 +162,14 @@ final class ConnectionHandler: @unchecked Sendable {
         }
 
         if handshakeStatus != noErr {
-            print("[MITM] TLS handshake failed for \(host): \(handshakeStatus)")
+            mitmLog.error("TLS handshake failed for \(host, privacy: .public): \(handshakeStatus)")
             return
         }
 
         // 4. Read the decrypted HTTP request from the client
         guard let decryptedResult = readFullHTTPRequest(sslContext: sslContext),
               let httpRequest = HTTPParser.parseRequest(from: decryptedResult.completeData) else {
-            print("[MITM] Failed to parse decrypted HTTP request for \(host)")
+            mitmLog.error("Failed to parse decrypted HTTP request for \(host, privacy: .public)")
             return
         }
 
@@ -238,7 +240,7 @@ final class ConnectionHandler: @unchecked Sendable {
         urlRequest.httpMethod = httpRequest.method
         for (key, value) in httpRequest.headers {
             let lk = key.lowercased()
-            if lk == "proxy-connection" || lk == "proxy-authorization" || lk == "host" || lk == "content-length" || lk == "transfer-encoding" { continue }
+            if lk == "proxy-connection" || lk == "proxy-authorization" || lk == "host" || lk == "content-length" || lk == "transfer-encoding" || lk == "expect" { continue }
             urlRequest.setValue(value, forHTTPHeaderField: key)
         }
         urlRequest.setValue(host, forHTTPHeaderField: "Host")
@@ -421,7 +423,7 @@ final class ConnectionHandler: @unchecked Sendable {
         urlRequest.httpMethod = request.method
         for (key, value) in request.headers {
             let lk = key.lowercased()
-            if lk == "proxy-connection" || lk == "proxy-authorization" || lk == "host" || lk == "content-length" || lk == "transfer-encoding" { continue }
+            if lk == "proxy-connection" || lk == "proxy-authorization" || lk == "host" || lk == "content-length" || lk == "transfer-encoding" || lk == "expect" { continue }
             urlRequest.setValue(value, forHTTPHeaderField: key)
         }
         if !request.body.isEmpty { urlRequest.httpBody = request.body }

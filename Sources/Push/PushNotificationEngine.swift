@@ -38,22 +38,13 @@ final class PushNotificationEngine {
 
     // MARK: - APNs
 
-    /// Send a push via APNs using P12 certificate TLS client authentication.
+    /// Send a push via APNs to one or more device tokens.
     /// `payloadJSON` is sent verbatim as the request body — you control the full structure.
-    /// The engine only reads "title" and "body" at the top level for history display.
-    func sendAPNs(deviceToken: String, payloadJSON: String) async {
+    /// Errors per-token are aggregated and surfaced via `lastError`.
+    func sendAPNs(deviceTokens: [String], payloadJSON: String) async {
         isSending = true
         lastError = nil
         defer { isSending = false }
-
-        // Extract title/body for history (best-effort)
-        let topLevel = (try? JSONSerialization.jsonObject(with: Data(payloadJSON.utf8))) as? [String: Any]
-        let title = topLevel?["title"] as? String
-            ?? (topLevel?["aps"] as? [String: Any]).flatMap { ($0["alert"] as? [String: Any])?["title"] as? String }
-            ?? ""
-        let body  = topLevel?["body"] as? String
-            ?? (topLevel?["aps"] as? [String: Any]).flatMap { ($0["alert"] as? [String: Any])?["body"] as? String }
-            ?? ""
 
         let cred = apnsCredential
         guard !cred.p12Base64.isEmpty, !cred.bundleID.isEmpty else {
@@ -66,14 +57,27 @@ final class PushNotificationEngine {
             return
         }
 
+        let identity: SecIdentity
         do {
-            let identity = try loadIdentity(p12Base64: cred.p12Base64, password: cred.p12Password)
+            identity = try loadIdentity(p12Base64: cred.p12Base64, password: cred.p12Password)
+        } catch {
+            lastError = error.localizedDescription
+            return
+        }
 
-            let host = cred.environment == .sandbox
-                ? "https://api.sandbox.push.apple.com"
-                : "https://api.push.apple.com"
-            guard let url = URL(string: "\(host)/3/device/\(deviceToken)") else {
-                throw PushError.invalidURL
+        let host = cred.environment == .sandbox
+            ? "https://api.sandbox.push.apple.com"
+            : "https://api.push.apple.com"
+
+        var failures: [(token: String, reason: String)] = []
+
+        for token in deviceTokens {
+            let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+
+            guard let url = URL(string: "\(host)/3/device/\(trimmed)") else {
+                failures.append((trimmed, PushError.invalidURL.localizedDescription ?? "Invalid URL"))
+                continue
             }
 
             var req = URLRequest(url: url)
@@ -82,20 +86,29 @@ final class PushNotificationEngine {
             req.setValue("alert",       forHTTPHeaderField: "apns-push-type")
             req.setValue("10",          forHTTPHeaderField: "apns-priority")
             req.setValue("application/json", forHTTPHeaderField: "content-type")
-            req.httpBody = payloadData   // ← sent verbatim
+            req.httpBody = payloadData
 
-            let delegate = APNsSessionDelegate(identity: identity)
-            let session  = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
-            let (_, response) = try await session.data(for: req)
-            session.finishTasksAndInvalidate()
+            do {
+                let delegate = APNsSessionDelegate(identity: identity)
+                let session  = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+                let (_, response) = try await session.data(for: req)
+                session.finishTasksAndInvalidate()
 
-            let http = response as? HTTPURLResponse
-            let code = http?.statusCode ?? 0
-            if !(200..<300).contains(code) {
-                lastError = http?.value(forHTTPHeaderField: "apns-id") ?? "Error \(code)"
+                let http = response as? HTTPURLResponse
+                let code = http?.statusCode ?? 0
+                if !(200..<300).contains(code) {
+                    let reason = http?.value(forHTTPHeaderField: "apns-id") ?? "HTTP \(code)"
+                    failures.append((trimmed, reason))
+                }
+            } catch {
+                failures.append((trimmed, error.localizedDescription))
             }
-        } catch {
-            lastError = error.localizedDescription
+        }
+
+        if !failures.isEmpty {
+            let total = deviceTokens.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
+            let summary = failures.map { "\($0.token.prefix(8))… – \($0.reason)" }.joined(separator: "\n")
+            lastError = "\(failures.count)/\(total) failed:\n\(summary)"
         }
     }
 
@@ -122,7 +135,7 @@ final class PushNotificationEngine {
     /// Send a push via FCM HTTP v1 using a Service Account JSON for OAuth2.
     /// `payloadJSON` top-level keys "title" and "body" are used for FCM notification + history;
     /// the entire dict is also forwarded as the FCM `data` field so the app receives everything.
-    func sendFCM(deviceToken: String, payloadJSON: String) async {
+    func sendFCM(deviceTokens: [String], payloadJSON: String) async {
         isSending = true
         lastError = nil
         defer { isSending = false }
@@ -136,45 +149,68 @@ final class PushNotificationEngine {
             return
         }
 
+        let sa: FCMServiceAccount
+        let accessToken: String
         do {
             guard let jsonData = fcmCredential.serviceAccountJSON.data(using: .utf8),
-                  let sa = try? JSONDecoder().decode(FCMServiceAccount.self, from: jsonData) else {
+                  let parsed = try? JSONDecoder().decode(FCMServiceAccount.self, from: jsonData) else {
                 throw PushError.invalidCredential("Cannot parse service account JSON")
             }
+            sa = parsed
+            accessToken = try await getFCMAccessToken(sa: sa)
+        } catch {
+            lastError = error.localizedDescription
+            return
+        }
 
-            let accessToken = try await getFCMAccessToken(sa: sa)
-            let urlStr = "https://fcm.googleapis.com/v1/projects/\(sa.projectID)/messages:send"
-            guard let url = URL(string: urlStr) else { throw PushError.invalidURL }
+        let urlStr = "https://fcm.googleapis.com/v1/projects/\(sa.projectID)/messages:send"
+        guard let url = URL(string: urlStr) else {
+            lastError = PushError.invalidURL.localizedDescription
+            return
+        }
 
-            // Convert payload JSON to [String: String] for FCM data field
-            var dataDict: [String: String] = [:]
-            if let dict = topLevel {
-                for (k, v) in dict {
-                    dataDict[k] = (v as? String) ?? "\(v)"
-                }
-            }
+        // Convert payload JSON to [String: String] for FCM data field
+        var dataDict: [String: String] = [:]
+        if let dict = topLevel {
+            for (k, v) in dict { dataDict[k] = (v as? String) ?? "\(v)" }
+        }
+
+        var failures: [(token: String, reason: String)] = []
+
+        for token in deviceTokens {
+            let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
 
             let message: [String: Any] = [
-                "token": deviceToken,
+                "token": trimmed,
                 "notification": ["title": title, "body": body],
                 "data": dataDict
             ]
-            let reqBody = try JSONSerialization.data(withJSONObject: ["message": message])
 
-            var req = URLRequest(url: url)
-            req.httpMethod = "POST"
-            req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-            req.setValue("application/json",      forHTTPHeaderField: "Content-Type")
-            req.httpBody = reqBody
+            do {
+                let reqBody = try JSONSerialization.data(withJSONObject: ["message": message])
+                var req = URLRequest(url: url)
+                req.httpMethod = "POST"
+                req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+                req.setValue("application/json",      forHTTPHeaderField: "Content-Type")
+                req.httpBody = reqBody
 
-            let (respData, response) = try await URLSession.shared.data(for: req)
-            let http = response as? HTTPURLResponse
-            let code = http?.statusCode ?? 0
-            if !(200..<300).contains(code) {
-                lastError = String(data: respData, encoding: .utf8) ?? "Error \(code)"
+                let (respData, response) = try await URLSession.shared.data(for: req)
+                let http = response as? HTTPURLResponse
+                let code = http?.statusCode ?? 0
+                if !(200..<300).contains(code) {
+                    let reason = String(data: respData, encoding: .utf8) ?? "HTTP \(code)"
+                    failures.append((trimmed, reason))
+                }
+            } catch {
+                failures.append((trimmed, error.localizedDescription))
             }
-        } catch {
-            lastError = error.localizedDescription
+        }
+
+        if !failures.isEmpty {
+            let total = deviceTokens.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
+            let summary = failures.map { "\($0.token.prefix(8))… – \($0.reason)" }.joined(separator: "\n")
+            lastError = "\(failures.count)/\(total) failed:\n\(summary)"
         }
     }
 
