@@ -164,8 +164,6 @@ struct BodySection: View {
     let title: String
     let content: String
     @State private var text: String = ""
-    @State private var editorHeight: CGFloat = 240
-    @State private var dragStartHeight: CGFloat = 240
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -178,24 +176,7 @@ struct BodySection: View {
                     .foregroundStyle(.secondary)
                     .italic()
             } else {
-                VStack(spacing: 0) {
-                    JSONEditorView(text: $text)
-                        .frame(height: editorHeight)
-                        .background(Color(nsColor: .textBackgroundColor))
-
-                    ResizeHandle()
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { value in
-                                    editorHeight = max(80, dragStartHeight + value.translation.height)
-                                }
-                                .onEnded { _ in
-                                    dragStartHeight = editorHeight
-                                }
-                        )
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.25)))
+                PrettyJSONView(text: $text, isReadOnly: true, minHeight: 200)
             }
         }
         .onAppear {

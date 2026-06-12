@@ -149,25 +149,11 @@ struct MockRuleEditorView: View {
                     // --- Response Body ---
                     SectionHeader(title: "Response Body", icon: "doc.text")
 
-                    HStack {
-                        Spacer()
-                        Button("Format JSON") { formatJSON() }
-                            .buttonStyle(.bordered)
-                    }
-
-                    JSONEditorView(text: $rule.responseBody)
-                        .frame(minHeight: 180)
-                        .padding(4)
-                        .background(Color(nsColor: .textBackgroundColor))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    PrettyJSONView(text: $rule.responseBody, minHeight: 180)
                         .onChange(of: rule.responseBody) { newValue in
-                            let fixed = newValue.replacingOccurrences(of: "“", with: "\"").replacingOccurrences(of: "”", with: "\"")
+                            let fixed = newValue.replacingOccurrences(of: "\u{201c}", with: "\"").replacingOccurrences(of: "\u{201d}", with: "\"")
                             if fixed != newValue { rule.responseBody = fixed }
                         }
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                        )
                 }
                 .padding(20)
             }
@@ -175,15 +161,7 @@ struct MockRuleEditorView: View {
         .frame(minWidth: 650, idealWidth: 700, minHeight: 650, idealHeight: 750)
     }
 
-    private func formatJSON() {
-        guard let data = rule.responseBody.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data),
-              let prettyData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]),
-              let prettyString = String(data: prettyData, encoding: .utf8) else {
-            return
-        }
-        rule.responseBody = prettyString
-    }
+
 
     private func statusMessage(_ code: Int) -> String {
         switch code {

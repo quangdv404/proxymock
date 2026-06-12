@@ -193,12 +193,7 @@ struct BreakpointEditorView: View {
 
                     Divider()
                     SectionHeader(title: "Body", icon: "doc.text")
-                    JSONEditorView(text: $edit.body)
-                        .frame(minHeight: 200)
-                        .padding(4)
-                        .background(Color(nsColor: .textBackgroundColor))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.3)))
+                    PrettyJSONView(text: $edit.body, minHeight: 200)
                 }
                 .padding(20)
             }

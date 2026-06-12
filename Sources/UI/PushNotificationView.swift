@@ -118,22 +118,12 @@ struct APNsComposerView: View {
                     HStack {
                         Text("Payload JSON").font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        if jsonError != nil {
-                            Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
-                            Text("Invalid JSON").font(.caption2).foregroundStyle(.orange)
-                        }
-                        Button("Format") { formatJSON() }
-                            .font(.caption).buttonStyle(.plain).foregroundStyle(.blue)
                         Button("Save") { showSavePrompt = true }
                             .font(.caption).buttonStyle(.plain).foregroundStyle(.green)
                         Button("Reset") { payloadJSON = defaultPayload }
                             .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
                     }
-                    JSONEditorView(text: $payloadJSON)
-                        .frame(minHeight: 200, maxHeight: 400)
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(
-                            jsonError != nil ? Color.orange : Color(.separatorColor)
-                        ))
+                    PrettyJSONView(text: $payloadJSON, minHeight: 200)
                         .onChange(of: payloadJSON) { _, _ in
                             validateJSON()
                             saveMessageCache()
@@ -218,13 +208,7 @@ struct APNsComposerView: View {
         PushCredentialStore.saveAPNsMessage(.init(deviceToken: deviceToken, payloadJSON: payloadJSON))
     }
 
-    private func formatJSON() {
-        guard let data = payloadJSON.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data),
-              let pretty = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]),
-              let str = String(data: pretty, encoding: .utf8) else { return }
-        payloadJSON = str
-    }
+
 
     private func send() {
         guard !payloadJSON.trimmingCharacters(in: .whitespaces).isEmpty else {
@@ -316,22 +300,12 @@ struct FCMComposerView: View {
                     HStack {
                         Text("Payload JSON").font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        if jsonError != nil {
-                            Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
-                            Text("Invalid JSON").font(.caption2).foregroundStyle(.orange)
-                        }
-                        Button("Format") { formatJSON() }
-                            .font(.caption).buttonStyle(.plain).foregroundStyle(.blue)
                         Button("Save") { showSavePrompt = true }
                             .font(.caption).buttonStyle(.plain).foregroundStyle(.green)
                         Button("Reset") { payloadJSON = defaultPayload }
                             .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
                     }
-                    JSONEditorView(text: $payloadJSON)
-                        .frame(minHeight: 200, maxHeight: 400)
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(
-                            jsonError != nil ? Color.orange : Color(.separatorColor)
-                        ))
+                    PrettyJSONView(text: $payloadJSON, minHeight: 200)
                         .onChange(of: payloadJSON) { _, _ in
                             validateJSON()
                             saveMessageCache()
@@ -417,13 +391,7 @@ struct FCMComposerView: View {
         PushCredentialStore.saveFCMMessage(.init(deviceToken: deviceToken, payloadJSON: payloadJSON))
     }
 
-    private func formatJSON() {
-        guard let data = payloadJSON.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data),
-              let pretty = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]),
-              let str = String(data: pretty, encoding: .utf8) else { return }
-        payloadJSON = str
-    }
+
 
     private func send() {
         guard !payloadJSON.trimmingCharacters(in: .whitespaces).isEmpty else {

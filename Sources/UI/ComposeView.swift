@@ -87,12 +87,7 @@ struct ComposeView: View {
 
                     // Body
                     SectionHeader(title: "Body", icon: "doc.text")
-                    JSONEditorView(text: $requestBody)
-                        .frame(minHeight: 200)
-                        .padding(4)
-                        .background(Color(nsColor: .textBackgroundColor))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.3)))
+                    PrettyJSONView(text: $requestBody, minHeight: 200)
 
                     // Quick templates
                     HStack(spacing: 8) {

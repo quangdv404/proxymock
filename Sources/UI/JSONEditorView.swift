@@ -1,11 +1,54 @@
 import SwiftUI
 import AppKit
 
+/// A custom NSTextView that manually handles standard keyboard shortcuts.
+/// This is needed in SwiftUI macOS apps if the standard Edit menu is missing.
+class CustomJSONTextView: NSTextView {
+    // We can call these handlers from performKeyEquivalent
+    var onFind: (() -> Void)?
+    var onReplace: (() -> Void)?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        if flags == .command {
+            switch event.charactersIgnoringModifiers {
+            case "x":
+                if NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: self) { return true }
+            case "c":
+                if NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: self) { return true }
+            case "v":
+                if NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: self) { return true }
+            case "z":
+                if NSApp.sendAction(Selector(("undo:")), to: nil, from: self) { return true }
+            case "a":
+                if NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: self) { return true }
+            case "f":
+                onFind?()
+                return true
+            case "r":
+                onReplace?()
+                return true
+            default:
+                break
+            }
+        } else if flags == [.command, .shift] {
+            if event.charactersIgnoringModifiers == "z" {
+                if NSApp.sendAction(Selector(("redo:")), to: nil, from: self) { return true }
+            }
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
 /// A macOS-specific code editor wrapping NSTextView, optimized for JSON editing.
 /// Features: syntax highlighting (debounced, visible-range-only for large docs),
 /// line-number gutter with cached offsets, horizontal scrolling.
 struct JSONEditorView: NSViewRepresentable {
     @Binding var text: String
+    var isEditable: Bool = true
+    /// Called once after the view is created, providing a reference to the coordinator
+    /// so the parent can call `openFindReplace()`, etc.
+    var onCoordinatorReady: ((Coordinator) -> Void)?
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -14,10 +57,12 @@ struct JSONEditorView: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
 
-        let textView = NSTextView()
-        textView.autoresizingMask = [.width]
+        let textView = CustomJSONTextView()
+        textView.autoresizingMask = [.width, .height]
         textView.isRichText = false
         textView.allowsUndo = true
+        textView.isEditable = isEditable
+        textView.isSelectable = true
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
@@ -25,28 +70,42 @@ struct JSONEditorView: NSViewRepresentable {
         textView.smartInsertDeleteEnabled = false
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
+        
+        // Horizontal scrolling (disable word wrap)
         textView.isHorizontallyResizable = true
         textView.isVerticallyResizable = true
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.textContainer?.widthTracksTextView = false
         textView.textContainer?.containerSize = NSSize(
             width: CGFloat.greatestFiniteMagnitude,
             height: CGFloat.greatestFiniteMagnitude
         )
+        
         textView.font = .monospacedSystemFont(ofSize: 12.5, weight: .regular)
         textView.backgroundColor = .textBackgroundColor
         textView.textColor = .textColor
         textView.textContainerInset = NSSize(width: 4, height: 6)
         textView.delegate = context.coordinator
+        textView.onFind = { [weak coordinator = context.coordinator] in coordinator?.openFind() }
+        textView.onReplace = { [weak coordinator = context.coordinator] in coordinator?.openFindReplace() }
 
         textView.string = text
+        context.coordinator.textViewRef = textView
         context.coordinator.scheduleHighlight(textView: textView)
 
         scrollView.documentView = textView
+
+        // Notify parent so it can hold a reference to the coordinator
+        DispatchQueue.main.async {
+            onCoordinatorReady?(context.coordinator)
+        }
+
         return scrollView
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard let textView = nsView.documentView as? NSTextView else { return }
+        textView.isEditable = isEditable
         if textView.string != text {
             let sel = textView.selectedRange()
             textView.string = text
@@ -62,6 +121,8 @@ struct JSONEditorView: NSViewRepresentable {
 
     @MainActor final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: JSONEditorView
+        /// Weak reference to the underlying NSTextView for programmatic actions
+        weak var textViewRef: NSTextView?
 
         /// Debounce task for syntax highlighting
         private var highlightTask: Task<Void, Never>?
@@ -78,6 +139,37 @@ struct JSONEditorView: NSViewRepresentable {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
             scheduleHighlight(textView: textView)
+        }
+
+        // MARK: - Find & Replace
+
+        /// Programmatically open the NSTextView find bar with Replace field visible and focus it.
+        func openFindReplace() {
+            guard let textView = textViewRef else { return }
+            let sender = NSMenuItem()
+            sender.tag = NSTextFinder.Action.showReplaceInterface.rawValue
+            textView.performFindPanelAction(sender)
+            focusFindTextField(in: textView)
+        }
+
+        /// Programmatically open the NSTextView find bar (find only) and focus it.
+        func openFind() {
+            guard let textView = textViewRef else { return }
+            let sender = NSMenuItem()
+            sender.tag = NSTextFinder.Action.showFindInterface.rawValue
+            textView.performFindPanelAction(sender)
+            focusFindTextField(in: textView)
+        }
+
+        private func focusFindTextField(in textView: NSTextView) {
+            // The find bar is added asynchronously to the scroll view. 
+            // We search for the NSSearchField and force focus on it.
+            DispatchQueue.main.async {
+                if let scrollView = textView.enclosingScrollView,
+                   let searchField = scrollView.findNSSearchField() {
+                    textView.window?.makeFirstResponder(searchField)
+                }
+            }
         }
 
         /// Debounced highlight: fires 200ms after the last keystroke.
@@ -145,5 +237,15 @@ struct JSONEditorView: NSViewRepresentable {
             }
             storage?.endEditing()
         }
+    }
+}
+
+extension NSView {
+    func findNSSearchField() -> NSSearchField? {
+        if let sf = self as? NSSearchField { return sf }
+        for sub in subviews {
+            if let sf = sub.findNSSearchField() { return sf }
+        }
+        return nil
     }
 }
